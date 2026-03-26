@@ -130,21 +130,23 @@ def calc_resumen_cartera(cartera_df: pd.DataFrame) -> dict:
 def calc_comparacion_cartera(actual_df: pd.DataFrame, objetivo_df: pd.DataFrame) -> pd.DataFrame:
     """
     Merge actual vs objetivo por ISIN.
-    Devuelve df con columnas: Fondo, Tipo, peso_actual, peso_objetivo, desviacion,
-    importe_actual, importe_objetivo, accion_eur (positivo=comprar, negativo=vender).
+    peso_actual se recalcula desde cero (importe_actual / total_actual).
+    No se usa la columna Peso actual del Excel para evitar inconsistencias.
     """
     total_actual = actual_df["Importe actual"].sum()
 
-    act = actual_df[["ISIN", "Fondo", "Tipo de activo", "Importe actual", "Peso actual"]].copy()
-    act.columns = ["ISIN", "Fondo", "Tipo", "importe_actual", "peso_actual"]
+    act = actual_df[["ISIN", "Fondo", "Tipo de activo", "Importe actual"]].copy()
+    act.columns = ["ISIN", "Fondo", "Tipo", "importe_actual"]
 
     obj = objetivo_df[["ISIN", "Peso"]].copy()
     obj.columns = ["ISIN", "peso_objetivo"]
 
     merged = act.merge(obj, on="ISIN", how="outer")
     merged["importe_actual"] = merged["importe_actual"].fillna(0)
-    merged["peso_actual"] = merged["peso_actual"].fillna(0)
     merged["peso_objetivo"] = merged["peso_objetivo"].fillna(0)
+
+    # Recalcular peso_actual desde cero
+    merged["peso_actual"] = merged["importe_actual"] / total_actual if total_actual > 0 else 0.0
 
     # Para fondos solo en objetivo, recuperar nombre y tipo
     for idx, row in merged[merged["Fondo"].isna()].iterrows():
@@ -347,27 +349,43 @@ if pagina == "🏦 Patrimonio":
                 help="Ganancia/pérdida total desde el importe inicial invertido",
             )
 
-        objetivo_cartera = load_cartera_objetivo()["Importe"].sum()
-        progreso = min(cartera_val / objetivo_cartera, 1.0) if objetivo_cartera > 0 else 0.0
-        st.markdown(f"**Progreso hacia cartera objetivo ({format_eur(objetivo_cartera)})**")
+        objetivo_inversion = patrimonio_total * 0.60
+        progreso = min(cartera_val / objetivo_inversion, 1.0) if objetivo_inversion > 0 else 0.0
+        pct_actual = (cartera_val / patrimonio_total * 100) if patrimonio_total > 0 else 0.0
+        st.markdown(f"**Objetivo: tener el 60% del patrimonio invertido ({format_eur(objetivo_inversion)})**")
         st.progress(progreso)
         st.caption(
-            f"Llevas el {progreso*100:.1f}% del camino — "
-            f"te faltan {format_eur(max(objetivo_cartera - cartera_val, 0))}"
+            f"Actualmente tienes invertido el {pct_actual:.1f}% de tu patrimonio — "
+            f"llevas el {progreso*100:.1f}% del camino · "
+            f"te faltan {format_eur(max(objetivo_inversion - cartera_val, 0))} por invertir"
         )
 
         st.markdown("---")
         col_donut, col_barras = st.columns(2)
 
         with col_donut:
-            st.subheader("Distribución por tipo de activo")
-            por_tipo_agrupado = resumen["por_tipo_agrupado"]
+            st.subheader("Distribución del patrimonio")
+
+            # Construir DataFrame combinando liquidez en cuentas + tipos de cartera
+            cuentas_total = patrimonio_df["Importe"].sum() - resumen["total_actual"]
+
+            por_tipo_agrupado = resumen["por_tipo_agrupado"].copy()
+
+            # Añadir fila de liquidez en cuentas
+            fila_liquidez = pd.DataFrame([{
+                "Tipo agrupado": "Liquidez en cuentas",
+                "Importe actual": cuentas_total
+            }])
+            por_tipo_completo = pd.concat([fila_liquidez, por_tipo_agrupado], ignore_index=True)
+            # Filtrar categorías con importe > 0
+            por_tipo_completo = por_tipo_completo[por_tipo_completo["Importe actual"] > 0]
+
             fig_donut = px.pie(
-                por_tipo_agrupado,
+                por_tipo_completo,
                 names="Tipo agrupado",
                 values="Importe actual",
                 hole=0.4,
-                color_discrete_sequence=["#1f77b4", "#2ca02c", "#ff7f0e", "#9467bd"],
+                color_discrete_sequence=["#aec7e8", "#1f77b4", "#2ca02c", "#ff7f0e", "#9467bd"],
             )
             fig_donut.update_traces(textinfo="percent+label")
             fig_donut.update_layout(showlegend=True, margin=dict(t=30, b=30, l=30, r=30))
@@ -477,15 +495,22 @@ elif pagina == "📊 Cartera actual vs objetivo":
         )
         st.plotly_chart(fig_comp, use_container_width=True)
 
-        # Slider patrimonio objetivo
-        st.subheader("Simulador de aportaciones necesarias")
+        st.subheader("Simulador: ¿cuánto necesitas para llegar al objetivo?")
+        st.caption(
+            "Calcula cuánto deberías tener en cada fondo según los pesos objetivo, "
+            "para un tamaño de cartera determinado."
+        )
+
+        cartera_objetivo_total = cartera_objetivo_df["Importe"].sum()
         total_actual = cartera_actual_df["Importe actual"].sum()
+
         patrimonio_slider = st.slider(
-            "Patrimonio objetivo total (€)",
-            min_value=6000,
+            "Cartera objetivo total (€)",
+            min_value=int(round(total_actual / 500) * 500),
             max_value=50000,
             step=500,
-            value=int(round(total_actual / 500) * 500),
+            value=int(round(cartera_objetivo_total / 500) * 500),
+            help="Tamaño total de cartera al que quieres llegar. Por defecto, el objetivo definido en el Excel."
         )
 
         sim = comp.copy()
@@ -494,10 +519,15 @@ elif pagina == "📊 Cartera actual vs objetivo":
         sim["Fondo_corto"] = sim["Fondo"].astype(str).str[:35]
 
         sim_display = sim[["Fondo_corto", "Tipo", "importe_actual", "importe_objetivo_sim", "aportacion_necesaria"]].copy()
-        sim_display.columns = ["Fondo", "Tipo", "Importe actual €", "Importe objetivo €", "Aportación necesaria €"]
+        sim_display.columns = ["Fondo", "Tipo", "Importe actual €", "Importe objetivo €", "Necesitas (€)"]
         sim_display = sim_display.round(2)
 
+        total_necesario = sim["aportacion_necesaria"].clip(lower=0).sum()
         st.dataframe(sim_display, use_container_width=True, hide_index=True)
+        st.info(
+            f"Para llegar a una cartera de **{format_eur(patrimonio_slider)}** "
+            f"necesitas aportar un total de **{format_eur(total_necesario)}** adicionales."
+        )
 
     except Exception as e:
         st.error(f"Error inesperado: {e}")
