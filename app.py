@@ -1234,6 +1234,123 @@ elif pagina == "📈 Proyección / escenarios":
             st.metric("Rentabilidad generada", format_eur(ultimo["rentabilidad_generada"]),
                 help="Lo que ha crecido tu dinero gracias al interés compuesto")
 
+        # --- SECCIÓN: Proyección de Nómina ---
+        st.markdown("---")
+        st.subheader("💼 Proyección de Nómina")
+        st.caption(
+            "Simula cómo evolucionará tu sueldo con un incremento anual compuesto. "
+            "Las pagas extra crecen al mismo ritmo que la nómina base."
+        )
+
+        nomina_mensual_actual = pres["nomina_mensual"]
+        paga_junio_actual = pres["paga_extra_junio"]
+        paga_dic_actual = pres["paga_extra_diciembre"]
+        ingreso_anual_actual = pres["ingreso_anual"]
+
+        col_nom1, col_nom2 = st.columns([2, 1])
+        with col_nom1:
+            incremento_nomina_slider = st.slider(
+                "Incremento anual de nómina (%)",
+                min_value=0.0,
+                max_value=10.0,
+                step=0.1,
+                value=float(INCREMENTO_NOMINA * 100),
+                format="%.1f%%",
+                key="slider_nomina",
+                help="Por defecto se usa el 3% configurado. Puedes ajustarlo para simular otros escenarios."
+            ) / 100
+        with col_nom2:
+            años_nomina = st.selectbox(
+                "Proyectar hasta el año",
+                options=list(range(1, 31)),
+                index=9,  # default: 10 años
+                key="select_años_nomina",
+                format_func=lambda x: f"Año {x}",
+            )
+
+        # Tabla de proyección año a año
+        filas_nomina = []
+        for año in range(0, años_nomina + 1):
+            factor = (1 + incremento_nomina_slider) ** año
+            nomina_mes = nomina_mensual_actual * factor
+            paga_j = paga_junio_actual * factor
+            paga_d = paga_dic_actual * factor
+            ingreso_total = nomina_mes * 12 + paga_j + paga_d
+            filas_nomina.append({
+                "Año": "Hoy" if año == 0 else f"Año {año}",
+                "Nómina mensual": format_eur(nomina_mes),
+                "Paga extra junio": format_eur(paga_j),
+                "Paga extra diciembre": format_eur(paga_d),
+                "Ingreso anual total": format_eur(ingreso_total),
+            })
+
+        with st.expander("Ver tabla de proyección año a año", expanded=True):
+            st.dataframe(pd.DataFrame(filas_nomina), hide_index=True, use_container_width=True)
+
+        # Gráfico evolución nómina
+        años_eje = list(range(0, años_nomina + 1))
+        nominas_mensuales = [nomina_mensual_actual * (1 + incremento_nomina_slider) ** a for a in años_eje]
+        ingresos_anuales = [
+            (nomina_mensual_actual * 12 + paga_junio_actual + paga_dic_actual) * (1 + incremento_nomina_slider) ** a
+            for a in años_eje
+        ]
+
+        fig_nomina = go.Figure()
+        fig_nomina.add_trace(go.Scatter(
+            x=años_eje, y=nominas_mensuales,
+            mode="lines+markers", name="Nómina mensual (€)",
+            line=dict(color="#1f77b4", width=2),
+            hovertemplate="Año %{x}: %{y:,.0f} €<extra></extra>",
+        ))
+        fig_nomina.add_trace(go.Scatter(
+            x=años_eje, y=ingresos_anuales,
+            mode="lines+markers", name="Ingreso anual total (€)",
+            line=dict(color="#2ca02c", width=2, dash="dash"),
+            yaxis="y2",
+            hovertemplate="Año %{x}: %{y:,.0f} €<extra></extra>",
+        ))
+        fig_nomina.update_layout(
+            xaxis_title="Años desde hoy",
+            yaxis=dict(title="Nómina mensual (€)", tickformat=",.0f"),
+            yaxis2=dict(
+                title="Ingreso anual (€)",
+                overlaying="y",
+                side="right",
+                tickformat=",.0f",
+            ),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(t=60, b=40, l=60, r=60),
+            hovermode="x unified",
+        )
+        st.plotly_chart(fig_nomina, use_container_width=True)
+
+        # KPIs nómina final
+        factor_final = (1 + incremento_nomina_slider) ** años_nomina
+        nomina_final = nomina_mensual_actual * factor_final
+        ingreso_anual_final = ingreso_anual_actual * factor_final
+        kpi1, kpi2, kpi3 = st.columns(3)
+        with kpi1:
+            st.metric(
+                f"Nómina mensual en {años_nomina} años",
+                format_eur(nomina_final),
+                delta=format_eur(nomina_final - nomina_mensual_actual),
+                help="Sueldo bruto mensual proyectado"
+            )
+        with kpi2:
+            st.metric(
+                f"Ingreso anual en {años_nomina} años",
+                format_eur(ingreso_anual_final),
+                delta=format_eur(ingreso_anual_final - ingreso_anual_actual),
+                help="Nómina anual + pagas extra proyectadas"
+            )
+        with kpi3:
+            incremento_total_pct = (factor_final - 1) * 100
+            st.metric(
+                "Incremento total acumulado",
+                f"+{incremento_total_pct:.1f}%",
+                help=f"Crecimiento compuesto en {años_nomina} años al {incremento_nomina_slider*100:.1f}% anual"
+            )
+
         # Años hasta objetivo
         st.subheader("¿Cuándo alcanzarás tu objetivo?")
         objetivo_val = st.number_input(
