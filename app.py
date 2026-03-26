@@ -6,6 +6,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+import unicodedata
 
 st.set_page_config(page_title="nONO Dashboard", layout="wide")
 
@@ -281,20 +282,63 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
     gastos = gastos[gastos["Gastos"].astype(str).str.strip() != ""].copy()
     gastos.columns = ["concepto", "importe"]
 
-    # Anualizar: nómina ×12, pagas ×1, gastos ×12
-    nomina_anual = 0.0
-    pagas_anual = 0.0
-    for _, r in ingresos.iterrows():
-        c = str(r["concepto"]).lower()
-        if "nomina" in c or "nómina" in c:
-            nomina_anual += r["importe"] * 12
-        else:
-            pagas_anual += r["importe"]
+    def _normaliza_concepto(texto: str) -> str:
+        txt = unicodedata.normalize("NFKD", str(texto))
+        txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+        return " ".join(txt.lower().strip().split())
 
-    ingreso_anual = nomina_anual + pagas_anual
-    gasto_anual = gastos["importe"].sum() * 12
+    # Anualizar: nómina ×12, pagas extra junio/diciembre ×1, gastos ×12
+    nomina_anual = 0.0
+    paga_extra_junio = 0.0
+    paga_extra_diciembre = 0.0
+    for _, r in ingresos.iterrows():
+        concepto_norm = _normaliza_concepto(r["concepto"])
+        importe = pd.to_numeric(r["importe"], errors="coerce")
+        if pd.isna(importe):
+            continue
+
+        if "nomina" in concepto_norm:
+            nomina_anual += float(importe) * 12
+        elif "junio" in concepto_norm:
+            paga_extra_junio += float(importe)
+        elif "diciembre" in concepto_norm:
+            paga_extra_diciembre += float(importe)
+
+    gasto_mensual = pd.to_numeric(gastos["importe"], errors="coerce").fillna(0.0).sum()
+    gasto_anual = gasto_mensual * 12
+    nomina_mensual = nomina_anual / 12
+    pagas_anual = paga_extra_junio + paga_extra_diciembre
+    ingreso_anual = nomina_anual + paga_extra_junio + paga_extra_diciembre
     ahorro_anual = ingreso_anual - gasto_anual
-    ahorro_mensual = ahorro_anual / 12
+    ahorro_mensual_base = nomina_mensual - gasto_mensual
+    ahorro_junio = nomina_mensual + paga_extra_junio - gasto_mensual
+    ahorro_diciembre = nomina_mensual + paga_extra_diciembre - gasto_mensual
+    ahorro_mensual_medio = ahorro_anual / 12
+
+    meses = [
+        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+    ]
+    detalle_rows = []
+    for mes in meses:
+        es_mes_paga = mes in {"Junio", "Diciembre"}
+        paga_extra = 0.0
+        if mes == "Junio":
+            paga_extra = paga_extra_junio
+        elif mes == "Diciembre":
+            paga_extra = paga_extra_diciembre
+
+        ingreso_mes = nomina_mensual + paga_extra
+        ahorro_mes = ingreso_mes - gasto_mensual
+        detalle_rows.append({
+            "Mes": mes,
+            "Ingreso del mes": ingreso_mes,
+            "Gasto del mes": gasto_mensual,
+            "Ahorro del mes": ahorro_mes,
+            "Tipo de mes": "Mes con paga extra" if es_mes_paga else "Mes normal",
+        })
+
+    detalle_mensual_df = pd.DataFrame(detalle_rows)
 
     return {
         "ingresos_df": ingresos,
@@ -304,7 +348,16 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
         "ingreso_anual": ingreso_anual,
         "gasto_anual": gasto_anual,
         "ahorro_anual": ahorro_anual,
-        "ahorro_mensual": ahorro_mensual,
+        "nomina_mensual": nomina_mensual,
+        "gasto_mensual": gasto_mensual,
+        "ahorro_mensual_base": ahorro_mensual_base,
+        "paga_extra_junio": paga_extra_junio,
+        "paga_extra_diciembre": paga_extra_diciembre,
+        "ahorro_junio": ahorro_junio,
+        "ahorro_diciembre": ahorro_diciembre,
+        "ahorro_mensual_medio": ahorro_mensual_medio,
+        "detalle_mensual_df": detalle_mensual_df,
+        "ahorro_mensual": ahorro_mensual_medio,
     }
 
 
@@ -314,19 +367,28 @@ def calc_ahorro_mensual_real(presupuesto_dict: dict) -> list:
     Junio (índice 5) y Diciembre (índice 11) incluyen paga extra.
     Gastos fijos son iguales todos los meses.
     """
-    nomina = presupuesto_dict["nomina_anual"] / 12
-    paga_junio = presupuesto_dict["pagas_anual"] / 2   # asume 2 pagas iguales
-    gasto_mensual = presupuesto_dict["gasto_anual"] / 12
+    if "detalle_mensual_df" in presupuesto_dict:
+        return presupuesto_dict["detalle_mensual_df"]["Ahorro del mes"].tolist()
 
-    ahorros = []
-    for mes in range(1, 13):
-        ingreso = nomina
-        if mes == 6:
-            ingreso += paga_junio
-        if mes == 12:
-            ingreso += paga_junio
-        ahorros.append(ingreso - gasto_mensual)
-    return ahorros
+    nomina_mensual = presupuesto_dict.get("nomina_mensual", presupuesto_dict["nomina_anual"] / 12)
+    gasto_mensual = presupuesto_dict.get("gasto_mensual", presupuesto_dict["gasto_anual"] / 12)
+    paga_extra_junio = presupuesto_dict.get("paga_extra_junio", 0.0)
+    paga_extra_diciembre = presupuesto_dict.get("paga_extra_diciembre", 0.0)
+
+    return [
+        nomina_mensual - gasto_mensual,  # Enero
+        nomina_mensual - gasto_mensual,  # Febrero
+        nomina_mensual - gasto_mensual,  # Marzo
+        nomina_mensual - gasto_mensual,  # Abril
+        nomina_mensual - gasto_mensual,  # Mayo
+        nomina_mensual + paga_extra_junio - gasto_mensual,  # Junio
+        nomina_mensual - gasto_mensual,  # Julio
+        nomina_mensual - gasto_mensual,  # Agosto
+        nomina_mensual - gasto_mensual,  # Septiembre
+        nomina_mensual - gasto_mensual,  # Octubre
+        nomina_mensual - gasto_mensual,  # Noviembre
+        nomina_mensual + paga_extra_diciembre - gasto_mensual,  # Diciembre
+    ]
 
 
 def calc_proyeccion_patrimonio(
@@ -715,6 +777,7 @@ elif pagina == "💶 Presupuesto y cash flow":
         presupuesto_df = load_presupuesto()
         pres = calc_presupuesto(presupuesto_df)
 
+        # BLOQUE 1 — KPIs principales
         col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Ingreso anual", format_eur(pres["ingreso_anual"]))
@@ -723,8 +786,22 @@ elif pagina == "💶 Presupuesto y cash flow":
         with col3:
             st.metric("Ahorro anual", format_eur(pres["ahorro_anual"]))
         with col4:
-            st.metric("Ahorro mensual", format_eur(pres["ahorro_mensual"]))
+            st.metric(
+                "Ahorro mensual base",
+                format_eur(pres["ahorro_mensual_base"]),
+                help="Ahorro típico de un mes ordinario sin pagas extra.",
+            )
 
+        # BLOQUE 2 — KPIs de meses con paga extra
+        col_jun, col_dic, col_med = st.columns(3)
+        with col_jun:
+            st.metric("Ahorro en junio", format_eur(pres["ahorro_junio"]))
+        with col_dic:
+            st.metric("Ahorro en diciembre", format_eur(pres["ahorro_diciembre"]))
+        with col_med:
+            st.metric("Ahorro mensual medio anual", format_eur(pres["ahorro_mensual_medio"]))
+
+        # BLOQUE 3 — Tasa de ahorro
         tasa = (pres["ahorro_anual"] / pres["ingreso_anual"] * 100) if pres["ingreso_anual"] > 0 else 0.0
         _, col_tasa, _ = st.columns(3)
         with col_tasa:
@@ -734,6 +811,7 @@ elif pagina == "💶 Presupuesto y cash flow":
                 help="Porcentaje de tus ingresos anuales que ahorras. Objetivo recomendado: >20%",
             )
 
+        # BLOQUE 4 — Tablas de ingresos y gastos
         st.markdown("---")
         col_ing, col_gas = st.columns(2)
 
@@ -753,7 +831,7 @@ elif pagina == "💶 Presupuesto y cash flow":
                 hide_index=True,
             )
 
-        # Waterfall
+        # BLOQUE 5 — Waterfall anual
         st.subheader("Waterfall: flujo anual de caja")
         fig_wf = go.Figure(
             go.Waterfall(
@@ -782,26 +860,41 @@ elif pagina == "💶 Presupuesto y cash flow":
         )
         st.plotly_chart(fig_wf, use_container_width=True)
 
-        # Proyección ahorro acumulado 12 meses
-        st.subheader("Proyección de ahorro acumulado (12 meses)")
-        meses = list(range(1, 13))
-        ahorro_acum = [pres["ahorro_mensual"] * m for m in meses]
+        # BLOQUE 6 — Tabla de ahorro mensual real
+        st.subheader("Ahorro real de cada mes del año")
+        st.dataframe(
+            pres["detalle_mensual_df"],
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Ingreso del mes": st.column_config.NumberColumn(format="%.2f"),
+                "Gasto del mes": st.column_config.NumberColumn(format="%.2f"),
+                "Ahorro del mes": st.column_config.NumberColumn(format="%.2f"),
+            },
+        )
 
-        fig_area = px.area(
-            x=meses,
-            y=ahorro_acum,
-            labels={"x": "Mes", "y": "Ahorro acumulado (€)"},
-            color_discrete_sequence=["#1f77b4"],
+        # BLOQUE 7 — Gráfico mensual de ahorro real
+        st.subheader("Gráfico mensual de ahorro real")
+        fig_ahorro_mes = px.bar(
+            pres["detalle_mensual_df"],
+            x="Mes",
+            y="Ahorro del mes",
+            color="Tipo de mes",
+            color_discrete_map={
+                "Mes normal": "#1f77b4",
+                "Mes con paga extra": "#2ca02c",
+            },
+            labels={"Ahorro del mes": "Ahorro del mes (€)"},
         )
-        fig_area.add_hline(
-            y=pres["ahorro_anual"],
-            line_dash="dot",
-            line_color="#d62728",
-            annotation_text=f"Objetivo anual: {format_eur(pres['ahorro_anual'])}",
-            annotation_position="top right",
+        fig_ahorro_mes.update_layout(margin=dict(t=30, b=30, l=30, r=30), legend_title_text="")
+        st.plotly_chart(fig_ahorro_mes, use_container_width=True)
+
+        # BLOQUE 8 — Texto de apoyo
+        st.caption(
+            "El ahorro mensual base refleja un mes ordinario sin pagas extra. "
+            "Junio y diciembre incluyen su paga extra correspondiente. "
+            "El ahorro mensual medio anual es solo una media y no representa la disponibilidad real de todos los meses."
         )
-        fig_area.update_layout(margin=dict(t=40, b=40, l=40, r=40))
-        st.plotly_chart(fig_area, use_container_width=True)
 
     except Exception as e:
         st.error(f"Error inesperado: {e}")
