@@ -792,19 +792,19 @@ elif pagina == "💶 Presupuesto y cash flow":
                 help="Ahorro típico de un mes ordinario sin pagas extra.",
             )
 
-        # BLOQUE 2 — KPIs de meses con paga extra
-        col_jun, col_dic, col_med = st.columns(3)
-        with col_jun:
-            st.metric("Ahorro en junio", format_eur(pres["ahorro_junio"]))
-        with col_dic:
-            st.metric("Ahorro en diciembre", format_eur(pres["ahorro_diciembre"]))
-        with col_med:
-            st.metric("Ahorro mensual medio anual", format_eur(pres["ahorro_mensual_medio"]))
-
-        # BLOQUE 3 — Tasa de ahorro
+        # BLOQUE 2 — KPI promedio mensual anual y tasa
+        cols_kpi = st.columns(2)
+        with cols_kpi[0]:
+            st.metric(
+                "Ahorro mensual medio anual",
+                format_eur(pres["ahorro_mensual_medio"]),
+                help=(
+                    "Se calcula como: ahorro anual ÷ 12 "
+                    "(incluye el efecto de las pagas extra repartido en todo el año)."
+                ),
+            )
         tasa = (pres["ahorro_anual"] / pres["ingreso_anual"] * 100) if pres["ingreso_anual"] > 0 else 0.0
-        _, col_tasa, _ = st.columns(3)
-        with col_tasa:
+        with cols_kpi[1]:
             st.metric(
                 "Tasa de ahorro",
                 f"{tasa:.1f}%",
@@ -880,13 +880,29 @@ elif pagina == "💶 Presupuesto y cash flow":
             x="Mes",
             y="Ahorro del mes",
             color="Tipo de mes",
+            category_orders={
+                "Mes": [
+                    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+                ]
+            },
             color_discrete_map={
                 "Mes normal": "#1f77b4",
                 "Mes con paga extra": "#2ca02c",
             },
             labels={"Ahorro del mes": "Ahorro del mes (€)"},
         )
-        fig_ahorro_mes.update_layout(margin=dict(t=30, b=30, l=30, r=30), legend_title_text="")
+        fig_ahorro_mes.update_layout(
+            margin=dict(t=30, b=30, l=30, r=30),
+            legend_title_text="",
+            xaxis={
+                "categoryorder": "array",
+                "categoryarray": [
+                    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+                ],
+            },
+        )
         st.plotly_chart(fig_ahorro_mes, use_container_width=True)
 
         # BLOQUE 8 — Texto de apoyo
