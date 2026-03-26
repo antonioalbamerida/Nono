@@ -220,16 +220,22 @@ def calc_proyeccion_patrimonio(
     rentabilidad_anual_pct: float,
     años: int = 10,
 ) -> pd.DataFrame:
-    """
-    Proyecta el patrimonio mes a mes durante `años` años.
-    Rentabilidad compuesta mensual. Devuelve df con columnas: mes, año, patrimonio.
-    """
     r_mensual = (1 + rentabilidad_anual_pct / 100) ** (1 / 12) - 1
     registros = []
     valor = patrimonio_inicial
+    aportaciones_acum = 0.0
     for m in range(1, años * 12 + 1):
-        valor = valor * (1 + r_mensual) + aportacion_mensual
-        registros.append({"mes": m, "año": m / 12, "patrimonio": valor})
+        interes = valor * r_mensual
+        valor = valor + interes + aportacion_mensual
+        aportaciones_acum += aportacion_mensual
+        rentabilidad_acum = valor - patrimonio_inicial - aportaciones_acum
+        registros.append({
+            "mes": m,
+            "año": round(m / 12, 4),
+            "patrimonio": valor,
+            "capital_propio": patrimonio_inicial + aportaciones_acum,
+            "rentabilidad_generada": rentabilidad_acum,
+        })
     return pd.DataFrame(registros)
 
 
@@ -647,6 +653,69 @@ elif pagina == "📈 Proyección / escenarios":
             margin=dict(t=60, b=40, l=40, r=40),
         )
         st.plotly_chart(fig_proy, use_container_width=True)
+
+        st.subheader("¿De dónde viene el crecimiento? Capital propio vs rentabilidad generada")
+        st.caption("Escenario base — muestra cuánto es dinero que tú aportas y cuánto genera solo la inversión")
+
+        fig_desglose = go.Figure()
+
+        fig_desglose.add_trace(
+            go.Scatter(
+                x=df_base["año"],
+                y=df_base["capital_propio"],
+                mode="lines",
+                name="Capital propio (inicial + aportaciones)",
+                line=dict(color="#1f77b4", width=0),
+                fill="tozeroy",
+                fillcolor="rgba(31, 119, 180, 0.4)",
+                stackgroup="uno",
+            )
+        )
+
+        fig_desglose.add_trace(
+            go.Scatter(
+                x=df_base["año"],
+                y=df_base["rentabilidad_generada"],
+                mode="lines",
+                name="Rentabilidad generada",
+                line=dict(color="#2ca02c", width=0),
+                fill="tonexty",
+                fillcolor="rgba(44, 160, 44, 0.4)",
+                stackgroup="uno",
+            )
+        )
+
+        fig_desglose.update_layout(
+            xaxis_title="Años",
+            yaxis_title="Patrimonio (€)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(t=60, b=40, l=40, r=40),
+            hovermode="x unified",
+        )
+
+        st.plotly_chart(fig_desglose, use_container_width=True)
+
+        # Métricas finales del desglose
+        ultimo = df_base.iloc[-1]
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric(
+                "Patrimonio final (base)",
+                format_eur(ultimo["patrimonio"]),
+                help="Valor total al final del horizonte en el escenario base"
+            )
+        with col2:
+            st.metric(
+                "Capital propio aportado",
+                format_eur(ultimo["capital_propio"]),
+                help="Tu patrimonio inicial más todas las aportaciones mensuales acumuladas"
+            )
+        with col3:
+            st.metric(
+                "Rentabilidad generada",
+                format_eur(ultimo["rentabilidad_generada"]),
+                help="Lo que ha crecido tu dinero solo, gracias al interés compuesto"
+            )
 
         # Tabla resumen escenarios
         st.subheader("Patrimonio final por escenario")
