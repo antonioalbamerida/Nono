@@ -287,7 +287,8 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
     Extrae ingresos y gastos del DataFrame de Presupuesto.
     Devuelve dict con listas y totales anuales/mensuales.
     Nómina mensual × 12, pagas extra × 1 cada una.
-    Gastos mensuales × 12.
+    Gastos mensuales × 12, gastos anuales × 1.
+    Los gastos cuyo concepto contenga 'anual' se tratan como anuales (no se multiplican por 12).
     """
     ingresos = presupuesto_df[["Ingresos", "Importe"]].dropna(subset=["Ingresos"])
     ingresos = ingresos[ingresos["Ingresos"].astype(str).str.strip() != ""].copy()
@@ -314,7 +315,7 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
         txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
         return " ".join(txt.lower().strip().split())
 
-    # Anualizar: nómina ×12, pagas extra junio/diciembre ×1, gastos ×12
+    # Anualizar: nómina ×12, pagas extra junio/diciembre ×1, gastos mensuales ×12, gastos anuales ×1
     nomina_anual = 0.0
     paga_extra_junio = 0.0
     paga_extra_diciembre = 0.0
@@ -331,16 +332,48 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
         elif "diciembre" in concepto_norm:
             paga_extra_diciembre += float(importe)
 
-    gasto_mensual = pd.to_numeric(gastos["importe"], errors="coerce").fillna(0.0).sum()
-    gasto_anual = gasto_mensual * 12
+    # Separar gastos mensuales (recurrentes) de gastos anuales (puntuales)
+    gastos_mensuales_rows = []
+    gastos_anuales_rows = []
+    for _, r in gastos.iterrows():
+        concepto_norm = _normaliza_concepto(r["concepto"])
+        importe = pd.to_numeric(r["importe"], errors="coerce")
+        if pd.isna(importe):
+            continue
+        if "anual" in concepto_norm:
+            gastos_anuales_rows.append({"concepto": r["concepto"], "importe": float(importe)})
+        else:
+            gastos_mensuales_rows.append({"concepto": r["concepto"], "importe": float(importe)})
+
+    gastos_mensuales_df = pd.DataFrame(gastos_mensuales_rows) if gastos_mensuales_rows else pd.DataFrame(columns=["concepto", "importe"])
+    gastos_anuales_df = pd.DataFrame(gastos_anuales_rows) if gastos_anuales_rows else pd.DataFrame(columns=["concepto", "importe"])
+
+    gasto_mensual = gastos_mensuales_df["importe"].sum() if not gastos_mensuales_df.empty else 0.0
+    gasto_anual_extra = gastos_anuales_df["importe"].sum() if not gastos_anuales_df.empty else 0.0
+    # Provisión mensual de gastos anuales (distribuida uniformemente en los 12 meses)
+    provision_mensual_gastos_anuales = gasto_anual_extra / 12
+    # Gasto efectivo mensual incluye la provisión de los gastos anuales
+    gasto_efectivo_mensual = gasto_mensual + provision_mensual_gastos_anuales
+
+    gasto_anual = gasto_mensual * 12 + gasto_anual_extra
     nomina_mensual = nomina_anual / 12
     pagas_anual = paga_extra_junio + paga_extra_diciembre
     ingreso_anual = nomina_anual + paga_extra_junio + paga_extra_diciembre
     ahorro_anual = ingreso_anual - gasto_anual
-    ahorro_mensual_base = nomina_mensual - gasto_mensual
-    ahorro_junio = nomina_mensual + paga_extra_junio - gasto_mensual
-    ahorro_diciembre = nomina_mensual + paga_extra_diciembre - gasto_mensual
+    ahorro_mensual_base = nomina_mensual - gasto_efectivo_mensual
+    ahorro_junio = nomina_mensual + paga_extra_junio - gasto_efectivo_mensual
+    ahorro_diciembre = nomina_mensual + paga_extra_diciembre - gasto_efectivo_mensual
     ahorro_mensual_medio = ahorro_anual / 12
+
+    # Ingresos por mes (para usar en proyecciones con crecimiento de nómina)
+    ingresos_mensuales_lista = []
+    for mes in MONTHS_ORDER:
+        if mes == "Junio":
+            ingresos_mensuales_lista.append(nomina_mensual + paga_extra_junio)
+        elif mes == "Diciembre":
+            ingresos_mensuales_lista.append(nomina_mensual + paga_extra_diciembre)
+        else:
+            ingresos_mensuales_lista.append(nomina_mensual)
 
     detalle_rows = []
     for mes in MONTHS_ORDER:
@@ -352,11 +385,11 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
             paga_extra = paga_extra_diciembre
 
         ingreso_mes = nomina_mensual + paga_extra
-        ahorro_mes = ingreso_mes - gasto_mensual
+        ahorro_mes = ingreso_mes - gasto_efectivo_mensual
         detalle_rows.append({
             "Mes": mes,
             "Ingreso del mes": ingreso_mes,
-            "Gasto del mes": gasto_mensual,
+            "Gasto del mes": gasto_efectivo_mensual,
             "Ahorro del mes": ahorro_mes,
             "Tipo de mes": "Mes con paga extra" if es_mes_paga else "Mes normal",
         })
@@ -370,13 +403,17 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
     return {
         "ingresos_df": ingresos,
         "gastos_df": gastos,
+        "gastos_mensuales_df": gastos_mensuales_df,
+        "gastos_anuales_df": gastos_anuales_df,
         "nomina_anual": nomina_anual,
         "pagas_anual": pagas_anual,
         "ingreso_anual": ingreso_anual,
+        "gasto_mensual": gasto_mensual,
+        "gasto_anual_extra": gasto_anual_extra,
         "gasto_anual": gasto_anual,
         "ahorro_anual": ahorro_anual,
         "nomina_mensual": nomina_mensual,
-        "gasto_mensual": gasto_mensual,
+        "gasto_efectivo_mensual": gasto_efectivo_mensual,
         "ahorro_mensual_base": ahorro_mensual_base,
         "paga_extra_junio": paga_extra_junio,
         "paga_extra_diciembre": paga_extra_diciembre,
@@ -385,6 +422,7 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
         "ahorro_mensual_medio": ahorro_mensual_medio,
         "detalle_mensual_df": detalle_mensual_df,
         "ahorro_mensual": ahorro_mensual_medio,
+        "ingresos_mensuales_lista": ingresos_mensuales_lista,
     }
 
 
@@ -425,17 +463,29 @@ def calc_proyeccion_patrimonio(
     pct_ahorro_invertido: float,
     rentabilidad_anual_pct: float,
     años: int = 10,
+    ingresos_mensuales: list = None,
+    incremento_nomina_anual: float = 0.0,
 ) -> pd.DataFrame:
     """
     Proyecta el patrimonio total mes a mes.
     - patrimonio_inicial: total cuentas + cartera
     - cartera_inicial: solo la parte invertida (sobre la que se aplica rentabilidad)
-    - ahorros_mensuales: lista de 12 floats con ahorro real por mes (se repite cada año)
+    - ahorros_mensuales: lista de 12 floats con ahorro real por mes (año base, se repite si no hay crecimiento)
     - pct_ahorro_invertido: fracción del ahorro que va a cartera (0.0 a 1.0)
     - rentabilidad_anual_pct: rentabilidad anual esperada sobre la cartera
+    - ingresos_mensuales: lista de 12 floats con el ingreso bruto mensual (necesario para aplicar crecimiento de nómina)
+    - incremento_nomina_anual: fracción de subida anual de nómina (p.ej. 0.03 = +3%). Los gastos quedan fijos.
     """
     r_mensual = (1 + rentabilidad_anual_pct / 100) ** (1 / 12) - 1
     registros = []
+
+    # Precalcular gastos fijos mensuales si hay crecimiento de nómina
+    if ingresos_mensuales is not None and incremento_nomina_anual != 0.0:
+        gastos_fijos_mensuales = [
+            ingresos_mensuales[i] - ahorros_mensuales[i] for i in range(12)
+        ]
+    else:
+        gastos_fijos_mensuales = None
 
     cartera = cartera_inicial
     liquidez = patrimonio_inicial - cartera_inicial
@@ -454,8 +504,15 @@ def calc_proyeccion_patrimonio(
     })
 
     for m in range(1, años * 12 + 1):
-        mes_del_año = ((m - 1) % 12)  # 0=enero, 5=junio, 11=diciembre
-        ahorro_mes = ahorros_mensuales[mes_del_año]
+        mes_del_año = (m - 1) % 12   # 0=enero, 5=junio, 11=diciembre
+        año_actual = (m - 1) // 12   # 0 durante el año 1, 1 durante el año 2, etc.
+
+        if gastos_fijos_mensuales is not None:
+            # La nómina crece (1+incremento)^año respecto al año base; los gastos quedan fijos
+            factor_crecimiento = (1 + incremento_nomina_anual) ** año_actual
+            ahorro_mes = ingresos_mensuales[mes_del_año] * factor_crecimiento - gastos_fijos_mensuales[mes_del_año]
+        else:
+            ahorro_mes = ahorros_mensuales[mes_del_año]
 
         # Rentabilidad solo sobre cartera
         interes = cartera * r_mensual
@@ -887,26 +944,47 @@ elif pagina == "💶 Presupuesto y cash flow":
         with col_gas:
             st.subheader("Gastos mensuales")
             st.dataframe(
-                pres["gastos_df"].rename(columns={"concepto": "Concepto", "importe": "Importe (€)"}),
+                pres["gastos_mensuales_df"].rename(columns={"concepto": "Concepto", "importe": "Importe (€)"}),
                 use_container_width=True,
                 hide_index=True,
             )
+            if not pres["gastos_anuales_df"].empty:
+                st.subheader("Gastos anuales")
+                st.dataframe(
+                    pres["gastos_anuales_df"].rename(columns={"concepto": "Concepto", "importe": "Importe (€)"}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
 
         # BLOQUE 5 — Waterfall anual
         st.subheader("Waterfall: flujo anual de caja")
+        gasto_mensual_anualizado = pres["gasto_mensual"] * 12
+        gasto_anual_extra = pres["gasto_anual_extra"]
+        wf_measures = ["relative", "relative", "relative"]
+        wf_x = ["Nómina anual", "Pagas extra", "Gastos mensuales anuales"]
+        wf_y = [pres["nomina_anual"], pres["pagas_anual"], -gasto_mensual_anualizado]
+        wf_text = [
+            format_eur(pres["nomina_anual"]),
+            format_eur(pres["pagas_anual"]),
+            f'-{format_eur(gasto_mensual_anualizado)}',
+        ]
+        if gasto_anual_extra > 0:
+            wf_measures.append("relative")
+            wf_x.append("Gastos anuales extras")
+            wf_y.append(-gasto_anual_extra)
+            wf_text.append(f'-{format_eur(gasto_anual_extra)}')
+        wf_measures.append("total")
+        wf_x.append("Ahorro neto anual")
+        wf_y.append(0)
+        wf_text.append(format_eur(pres["ahorro_anual"]))
         fig_wf = go.Figure(
             go.Waterfall(
                 name="Cash flow anual",
                 orientation="v",
-                measure=["relative", "relative", "relative", "total"],
-                x=["Nómina anual", "Pagas extra", "Gastos fijos anuales", "Ahorro neto anual"],
-                y=[pres["nomina_anual"], pres["pagas_anual"], -pres["gasto_anual"], 0],
-                text=[
-                    format_eur(pres["nomina_anual"]),
-                    format_eur(pres["pagas_anual"]),
-                    f'-{format_eur(pres["gasto_anual"])}',
-                    format_eur(pres["ahorro_anual"]),
-                ],
+                measure=wf_measures,
+                x=wf_x,
+                y=wf_y,
+                text=wf_text,
                 textposition="outside",
                 increasing={"marker": {"color": "#2ca02c"}},
                 decreasing={"marker": {"color": "#d62728"}},
@@ -952,11 +1030,18 @@ elif pagina == "💶 Presupuesto y cash flow":
         st.plotly_chart(fig_ahorro_mes, use_container_width=True)
 
         # BLOQUE 8 — Texto de apoyo
-        st.caption(
+        caption_parts = [
             "El ahorro mensual base refleja un mes ordinario sin pagas extra. "
             "Junio y diciembre incluyen su paga extra correspondiente. "
             "El ahorro mensual medio anual es solo una media y no representa la disponibilidad real de todos los meses."
-        )
+        ]
+        if pres["gasto_anual_extra"] > 0:
+            provision = pres["gasto_anual_extra"] / 12
+            caption_parts.append(
+                f"El gasto del mes incluye una provisión de {format_eur(provision)}/mes "
+                f"correspondiente a los gastos anuales ({format_eur(pres['gasto_anual_extra'])}/año)."
+            )
+        st.caption(" ".join(caption_parts))
 
     except Exception as e:
         st.error(f"Error inesperado: {e}")
@@ -978,6 +1063,8 @@ elif pagina == "📈 Proyección / escenarios":
         patrimonio_total = calc_patrimonio_total(patrimonio_df)
         cartera_inicial = cartera_actual_df["Importe actual"].sum()
         ahorros_mensuales = calc_ahorro_mensual_real(pres)
+        ingresos_mensuales = pres["ingresos_mensuales_lista"]
+        INCREMENTO_NOMINA = 0.03  # +3% de subida de nómina anual
 
         # Controles en sidebar
         with st.sidebar:
@@ -1023,15 +1110,16 @@ elif pagina == "📈 Proyección / escenarios":
         rent_opt = rent_base + 2.0
         rent_pes = max(rent_base - 2.0, 0.0)
 
-        df_base = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_base, horizonte)
-        df_opt  = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_opt, horizonte)
-        df_pes  = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_pes, horizonte)
+        df_base = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_base, horizonte, ingresos_mensuales, INCREMENTO_NOMINA)
+        df_opt  = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_opt,  horizonte, ingresos_mensuales, INCREMENTO_NOMINA)
+        df_pes  = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_pes,  horizonte, ingresos_mensuales, INCREMENTO_NOMINA)
 
         # Gráfico escenarios
         st.subheader("Evolución del patrimonio total")
         st.caption(
             "La rentabilidad se aplica únicamente al patrimonio invertido (cartera). "
-            "La parte no invertida (liquidez) no genera rentabilidad en esta simulación."
+            "La parte no invertida (liquidez) no genera rentabilidad en esta simulación. "
+            f"Se aplica una subida de nómina del {INCREMENTO_NOMINA*100:.0f}% anual con gastos fijos."
         )
         fig_proy = go.Figure()
 
@@ -1071,9 +1159,9 @@ elif pagina == "📈 Proyección / escenarios":
         st.subheader("Patrimonio final por escenario")
         resumen_rows = []
         for h in [5, 10, 20]:
-            d_b = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_base, h)
-            d_o = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_opt, h)
-            d_p = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_pes, h)
+            d_b = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_base, h, ingresos_mensuales, INCREMENTO_NOMINA)
+            d_o = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_opt,  h, ingresos_mensuales, INCREMENTO_NOMINA)
+            d_p = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_pes,  h, ingresos_mensuales, INCREMENTO_NOMINA)
             resumen_rows.append({
                 "Horizonte": f"{h} años",
                 f"Pesimista ({rent_pes:.1f}%)": format_eur(d_p.iloc[-1]["patrimonio"]),
