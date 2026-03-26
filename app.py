@@ -601,6 +601,9 @@ elif pagina == "📊 Cartera actual vs objetivo":
         cartera_objetivo_df = load_cartera_objetivo()
         patrimonio_df = load_patrimonio()
         patrimonio_total = calc_patrimonio_total(patrimonio_df)
+        resumen_cartera = calc_resumen_cartera(cartera_actual_df)
+        rentabilidad_total_eur = resumen_cartera["rentabilidad_eur"]
+        rentabilidad_total_pct = resumen_cartera["rentabilidad_pct"] * 100
         modo = st.radio(
             "Modo de análisis",
             ["Rebalanceo sobre cartera actual", "Plan de aportaciones hasta 60% del patrimonio"],
@@ -617,7 +620,7 @@ elif pagina == "📊 Cartera actual vs objetivo":
                 rebalanceo_df.loc[rebalanceo_df["accion_rebalanceo"] < 0, "accion_rebalanceo"]
             ).sum()
 
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4, col5 = st.columns(5)
             col1.metric("Total cartera actual", format_eur(total_actual))
             col2.metric("Fondos sobreponderados", fondos_sobre)
             col3.metric("Fondos infraponderados", fondos_infra)
@@ -625,6 +628,13 @@ elif pagina == "📊 Cartera actual vs objetivo":
                 "Rotación necesaria total (€)",
                 format_eur(rotacion_total),
                 help="Importe total que habría que reducir en fondos sobreponderados para rebalancear la cartera manteniendo su tamaño actual.",
+            )
+            col5.metric(
+                "Rentabilidad cartera",
+                format_eur(rentabilidad_total_eur),
+                delta=f"{rentabilidad_total_pct:+.2f}%",
+                delta_color="normal",
+                help="Ganancia/pérdida total desde el importe inicial invertido.",
             )
 
             tabla = rebalanceo_df.copy()
@@ -722,7 +732,7 @@ elif pagina == "📊 Cartera actual vs objetivo":
                 "coherente con la pestaña 🏦 Patrimonio."
             )
 
-            col1, col2, col3, col4 = st.columns(4)
+            col1, col2, col3, col4, col5 = st.columns(5)
             col1.metric("Patrimonio total", format_eur(patrimonio_total))
             col2.metric("Objetivo invertido (60%)", format_eur(cartera_objetivo_total))
             col3.metric(
@@ -731,6 +741,13 @@ elif pagina == "📊 Cartera actual vs objetivo":
                 help="Este modo no representa un rebalanceo puro, sino un plan de asignación del capital adicional necesario para que la cartera invertida alcance el 60% del patrimonio.",
             )
             col4.metric("Fondos a reforzar", fondos_reforzar)
+            col5.metric(
+                "Rentabilidad cartera",
+                format_eur(rentabilidad_total_eur),
+                delta=f"{rentabilidad_total_pct:+.2f}%",
+                delta_color="normal",
+                help="Ganancia/pérdida total desde el importe inicial invertido.",
+            )
 
             mostrar_solo_reforzar = st.checkbox(
                 "Mostrar solo fondos con aportación necesaria positiva",
