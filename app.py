@@ -1070,6 +1070,117 @@ elif pagina == "💶 Presupuesto y cash flow":
             )
         st.caption(" ".join(caption_parts))
 
+        # BLOQUE 9 — Runway financiero (¿cuánto tiempo podría vivir sin ingresos?)
+        st.markdown("---")
+        st.subheader("🛬 Runway financiero")
+        st.caption("¿Cuánto tiempo podrías vivir sin ingresos si mañana perdieras el trabajo?")
+
+        gasto_mensual_ref = pres["gasto_efectivo_mensual"]
+
+        try:
+            patrimonio_df_run = load_patrimonio()
+            cartera_run_df = load_cartera_actual()
+            patrimonio_total_run = calc_patrimonio_total(patrimonio_df_run)
+            cartera_val_run = cartera_run_df["Importe actual"].sum()
+            liquidez_run = patrimonio_total_run - cartera_val_run
+        except Exception:
+            patrimonio_total_run = 0.0
+            liquidez_run = 0.0
+
+        if gasto_mensual_ref > 0 and patrimonio_total_run > 0:
+            runway_liquidez = liquidez_run / gasto_mensual_ref
+            runway_total = patrimonio_total_run / gasto_mensual_ref
+
+            col_r1, col_r2, col_r3 = st.columns(3)
+            with col_r1:
+                st.metric(
+                    "Gasto mensual de referencia",
+                    format_eur(gasto_mensual_ref),
+                    help="Gasto efectivo mensual (incluye provisión de gastos anuales).",
+                )
+            with col_r2:
+                meses_liq = int(runway_liquidez)
+                anyos_liq = meses_liq // 12
+                meses_liq_resto = meses_liq % 12
+                label_liq = f"{meses_liq} meses"
+                if anyos_liq > 0:
+                    label_liq = f"{anyos_liq} a {meses_liq_resto} m" if meses_liq_resto else f"{anyos_liq} años"
+                st.metric(
+                    "Runway con liquidez",
+                    label_liq,
+                    help=f"Solo con el efectivo en cuentas ({format_eur(liquidez_run)}), sin tocar inversiones.",
+                )
+            with col_r3:
+                meses_tot = int(runway_total)
+                anyos_tot = meses_tot // 12
+                meses_tot_resto = meses_tot % 12
+                label_tot = f"{meses_tot} meses"
+                if anyos_tot > 0:
+                    label_tot = f"{anyos_tot} a {meses_tot_resto} m" if meses_tot_resto else f"{anyos_tot} años"
+                st.metric(
+                    "Runway con todo el patrimonio",
+                    label_tot,
+                    help=f"Liquidando también las inversiones ({format_eur(patrimonio_total_run)} total).",
+                )
+
+            # Barra de referencia: colores según meses de runway con liquidez
+            RUNWAY_MINIMO = 3   # meses mínimo recomendado (fondo de emergencia básico)
+            RUNWAY_OPTIMO = 6   # meses óptimo recomendado
+            RUNWAY_EXCELENTE = 12  # más de 1 año: muy cómodo
+
+            if runway_liquidez < RUNWAY_MINIMO:
+                color_bar = "#d62728"
+                estado = "⚠️ Por debajo del fondo de emergencia mínimo recomendado (3 meses)"
+            elif runway_liquidez < RUNWAY_OPTIMO:
+                color_bar = "#ff7f0e"
+                estado = "🟡 Fondo de emergencia básico — se recomienda llegar a 6 meses"
+            elif runway_liquidez < RUNWAY_EXCELENTE:
+                color_bar = "#2ca02c"
+                estado = "✅ Fondo de emergencia sólido (6–12 meses)"
+            else:
+                color_bar = "#1f77b4"
+                estado = "🏆 Fondo de emergencia excelente (más de 12 meses)"
+
+            st.markdown(estado)
+
+            # Gráfico de barras comparativo
+            runway_df = pd.DataFrame({
+                "Escenario": ["Solo liquidez", "Todo el patrimonio"],
+                "Meses de runway": [runway_liquidez, runway_total],
+                "Detalle": [
+                    f"{format_eur(liquidez_run)} / {format_eur(gasto_mensual_ref)}/mes",
+                    f"{format_eur(patrimonio_total_run)} / {format_eur(gasto_mensual_ref)}/mes",
+                ],
+            })
+            fig_run = px.bar(
+                runway_df,
+                x="Escenario",
+                y="Meses de runway",
+                text="Meses de runway",
+                color="Escenario",
+                color_discrete_map={
+                    "Solo liquidez": color_bar,
+                    "Todo el patrimonio": "#1f77b4",
+                },
+                labels={"Meses de runway": "Meses sin ingresos"},
+            )
+            fig_run.update_traces(texttemplate="%{y:.1f} meses", textposition="outside")
+            # Líneas de referencia
+            fig_run.add_hline(y=RUNWAY_MINIMO, line_dash="dot", line_color="red",
+                              annotation_text="Mínimo (3m)", annotation_position="top right")
+            fig_run.add_hline(y=RUNWAY_OPTIMO, line_dash="dot", line_color="orange",
+                              annotation_text="Óptimo (6m)", annotation_position="top right")
+            fig_run.add_hline(y=RUNWAY_EXCELENTE, line_dash="dot", line_color="green",
+                              annotation_text="Excelente (12m)", annotation_position="top right")
+            fig_run.update_layout(
+                margin=dict(t=40, b=40, l=40, r=40),
+                showlegend=False,
+                yaxis_title="Meses sin ingresos",
+            )
+            st.plotly_chart(fig_run, use_container_width=True)
+        else:
+            st.info("No hay datos suficientes de patrimonio o gasto para calcular el runway.")
+
     except Exception as e:
         st.error(f"Error inesperado: {e}")
         st.stop()
