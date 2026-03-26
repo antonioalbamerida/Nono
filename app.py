@@ -214,28 +214,79 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
     }
 
 
+def calc_ahorro_mensual_real(presupuesto_dict: dict) -> list:
+    """
+    Devuelve una lista de 12 floats con el ahorro neto real de cada mes.
+    Junio (índice 5) y Diciembre (índice 11) incluyen paga extra.
+    Gastos fijos son iguales todos los meses.
+    """
+    nomina = presupuesto_dict["nomina_anual"] / 12
+    paga_junio = presupuesto_dict["pagas_anual"] / 2   # asume 2 pagas iguales
+    gasto_mensual = presupuesto_dict["gasto_anual"] / 12
+
+    ahorros = []
+    for mes in range(1, 13):
+        ingreso = nomina
+        if mes == 6:
+            ingreso += paga_junio
+        if mes == 12:
+            ingreso += paga_junio
+        ahorros.append(ingreso - gasto_mensual)
+    return ahorros
+
+
 def calc_proyeccion_patrimonio(
     patrimonio_inicial: float,
-    aportacion_mensual: float,
+    cartera_inicial: float,
+    ahorros_mensuales: list,
+    pct_ahorro_invertido: float,
     rentabilidad_anual_pct: float,
     años: int = 10,
 ) -> pd.DataFrame:
+    """
+    Proyecta el patrimonio total mes a mes.
+    - patrimonio_inicial: total cuentas + cartera
+    - cartera_inicial: solo la parte invertida (sobre la que se aplica rentabilidad)
+    - ahorros_mensuales: lista de 12 floats con ahorro real por mes (se repite cada año)
+    - pct_ahorro_invertido: fracción del ahorro que va a cartera (0.0 a 1.0)
+    - rentabilidad_anual_pct: rentabilidad anual esperada sobre la cartera
+    """
     r_mensual = (1 + rentabilidad_anual_pct / 100) ** (1 / 12) - 1
     registros = []
-    valor = patrimonio_inicial
+
+    cartera = cartera_inicial
+    liquidez = patrimonio_inicial - cartera_inicial
     aportaciones_acum = 0.0
+
     for m in range(1, años * 12 + 1):
-        interes = valor * r_mensual
-        valor = valor + interes + aportacion_mensual
-        aportaciones_acum += aportacion_mensual
-        rentabilidad_acum = valor - patrimonio_inicial - aportaciones_acum
+        mes_del_año = ((m - 1) % 12)  # 0=enero, 5=junio, 11=diciembre
+        ahorro_mes = ahorros_mensuales[mes_del_año]
+
+        # Rentabilidad solo sobre cartera
+        interes = cartera * r_mensual
+        cartera += interes
+
+        # Aportación: % del ahorro va a cartera, resto a liquidez
+        aportacion_cartera = ahorro_mes * pct_ahorro_invertido
+        aportacion_liquidez = ahorro_mes * (1 - pct_ahorro_invertido)
+        cartera += aportacion_cartera
+        liquidez += aportacion_liquidez
+        aportaciones_acum += ahorro_mes
+
+        patrimonio_total = cartera + liquidez
+        capital_propio = patrimonio_inicial + aportaciones_acum
+        rentabilidad_generada = patrimonio_total - capital_propio
+
         registros.append({
             "mes": m,
             "año": round(m / 12, 4),
-            "patrimonio": valor,
-            "capital_propio": patrimonio_inicial + aportaciones_acum,
-            "rentabilidad_generada": rentabilidad_acum,
+            "patrimonio": patrimonio_total,
+            "cartera": cartera,
+            "liquidez": liquidez,
+            "capital_propio": capital_propio,
+            "rentabilidad_generada": rentabilidad_generada,
         })
+
     return pd.DataFrame(registros)
 
 
@@ -560,6 +611,7 @@ elif pagina == "💶 Presupuesto y cash flow":
 # ============================================================
 elif pagina == "📈 Proyección / escenarios":
     st.title("📈 Proyección / escenarios")
+
     try:
         cartera_actual_df = load_cartera_actual()
         patrimonio_df = load_patrimonio()
@@ -567,25 +619,30 @@ elif pagina == "📈 Proyección / escenarios":
 
         pres = calc_presupuesto(presupuesto_df)
         patrimonio_total = calc_patrimonio_total(patrimonio_df)
+        cartera_inicial = cartera_actual_df["Importe actual"].sum()
+        ahorros_mensuales = calc_ahorro_mensual_real(pres)
 
-        # Controles en columna lateral
+        # Controles en sidebar
         with st.sidebar:
             st.markdown("---")
             st.subheader("Parámetros de proyección")
             rent_base = st.slider(
-                "Rentabilidad anual esperada (%)",
+                "Rentabilidad anual esperada sobre cartera (%)",
                 min_value=0.0,
                 max_value=15.0,
                 step=0.1,
                 value=3.0,
+                help="Se aplica solo sobre el dinero invertido en fondos, no sobre la liquidez en cuentas"
             )
-            aportacion_mensual = st.slider(
-                "Aportación mensual adicional (€)",
+            pct_invertido = st.slider(
+                "% del ahorro mensual que inviertes",
                 min_value=0,
-                max_value=2000,
-                step=50,
-                value=int(round(pres["ahorro_mensual"] / 50) * 50),
-            )
+                max_value=100,
+                step=5,
+                value=50,
+                format="%d%%",
+                help="El resto del ahorro se acumula como liquidez en cuentas"
+            ) / 100.0
 
         horizonte = st.radio(
             "Horizonte temporal",
@@ -594,97 +651,95 @@ elif pagina == "📈 Proyección / escenarios":
             horizontal=True,
         )
 
+        # Mostrar ahorro mensual real por mes como referencia
+        with st.expander("Ver ahorro mensual estimado por mes"):
+            nombres_meses = ["Ene","Feb","Mar","Abr","May","Jun","Jul","Ago","Sep","Oct","Nov","Dic"]
+            df_ahorros = pd.DataFrame({
+                "Mes": nombres_meses,
+                "Ahorro estimado": [format_eur(a) for a in ahorros_mensuales],
+            })
+            st.dataframe(df_ahorros, hide_index=True, use_container_width=True)
+            st.caption(f"Ahorro medio mensual: {format_eur(sum(ahorros_mensuales)/12)} · "
+                      f"De ese ahorro, inviertes el {pct_invertido*100:.0f}% "
+                      f"({format_eur(sum(ahorros_mensuales)/12 * pct_invertido)}/mes de media)")
+
         rent_opt = rent_base + 2.0
         rent_pes = max(rent_base - 2.0, 0.0)
 
-        df_base = calc_proyeccion_patrimonio(patrimonio_total, aportacion_mensual, rent_base, horizonte)
-        df_opt = calc_proyeccion_patrimonio(patrimonio_total, aportacion_mensual, rent_opt, horizonte)
-        df_pes = calc_proyeccion_patrimonio(patrimonio_total, aportacion_mensual, rent_pes, horizonte)
+        df_base = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_base, horizonte)
+        df_opt  = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_opt, horizonte)
+        df_pes  = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_pes, horizonte)
 
-        # Gráfico con 3 curvas + área entre optimista y pesimista
+        # Gráfico escenarios
+        st.subheader("Evolución del patrimonio total")
         fig_proy = go.Figure()
 
-        # Área rellena entre optimista y pesimista
-        fig_proy.add_trace(
-            go.Scatter(
-                x=df_opt["año"].tolist() + df_pes["año"].tolist()[::-1],
-                y=df_opt["patrimonio"].tolist() + df_pes["patrimonio"].tolist()[::-1],
-                fill="toself",
-                fillcolor="rgba(128,128,128,0.1)",
-                line=dict(color="rgba(255,255,255,0)"),
-                showlegend=False,
-                name="Rango",
-                hoverinfo="skip",
-            )
-        )
-
-        fig_proy.add_trace(
-            go.Scatter(
-                x=df_pes["año"],
-                y=df_pes["patrimonio"],
-                mode="lines",
-                name=f"Pesimista ({rent_pes:.1f}%)",
-                line=dict(color="#d62728", dash="dash"),
-            )
-        )
-        fig_proy.add_trace(
-            go.Scatter(
-                x=df_base["año"],
-                y=df_base["patrimonio"],
-                mode="lines",
-                name=f"Base ({rent_base:.1f}%)",
-                line=dict(color="#1f77b4", width=2),
-            )
-        )
-        fig_proy.add_trace(
-            go.Scatter(
-                x=df_opt["año"],
-                y=df_opt["patrimonio"],
-                mode="lines",
-                name=f"Optimista ({rent_opt:.1f}%)",
-                line=dict(color="#2ca02c", dash="dash"),
-            )
-        )
-
+        fig_proy.add_trace(go.Scatter(
+            x=df_opt["año"].tolist() + df_pes["año"].tolist()[::-1],
+            y=df_opt["patrimonio"].tolist() + df_pes["patrimonio"].tolist()[::-1],
+            fill="toself",
+            fillcolor="rgba(128,128,128,0.1)",
+            line=dict(color="rgba(255,255,255,0)"),
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+        fig_proy.add_trace(go.Scatter(
+            x=df_pes["año"], y=df_pes["patrimonio"],
+            mode="lines", name=f"Pesimista ({rent_pes:.1f}%)",
+            line=dict(color="#d62728", dash="dash"),
+        ))
+        fig_proy.add_trace(go.Scatter(
+            x=df_base["año"], y=df_base["patrimonio"],
+            mode="lines", name=f"Base ({rent_base:.1f}%)",
+            line=dict(color="#1f77b4", width=2),
+        ))
+        fig_proy.add_trace(go.Scatter(
+            x=df_opt["año"], y=df_opt["patrimonio"],
+            mode="lines", name=f"Optimista ({rent_opt:.1f}%)",
+            line=dict(color="#2ca02c", dash="dash"),
+        ))
         fig_proy.update_layout(
             xaxis_title="Años",
-            yaxis_title="Patrimonio (€)",
+            yaxis_title="Patrimonio total (€)",
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
             margin=dict(t=60, b=40, l=40, r=40),
         )
         st.plotly_chart(fig_proy, use_container_width=True)
 
-        st.subheader("¿De dónde viene el crecimiento? Capital propio vs rentabilidad generada")
-        st.caption("Escenario base — muestra cuánto es dinero que tú aportas y cuánto genera solo la inversión")
+        # Tabla resumen escenarios
+        st.subheader("Patrimonio final por escenario")
+        resumen_rows = []
+        for h in [5, 10, 20]:
+            d_b = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_base, h)
+            d_o = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_opt, h)
+            d_p = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_pes, h)
+            resumen_rows.append({
+                "Horizonte": f"{h} años",
+                f"Pesimista ({rent_pes:.1f}%)": format_eur(d_p.iloc[-1]["patrimonio"]),
+                f"Base ({rent_base:.1f}%)": format_eur(d_b.iloc[-1]["patrimonio"]),
+                f"Optimista ({rent_opt:.1f}%)": format_eur(d_o.iloc[-1]["patrimonio"]),
+            })
+        st.dataframe(pd.DataFrame(resumen_rows), hide_index=True, use_container_width=True)
+
+        # Gráfico desglose capital propio vs rentabilidad
+        st.subheader("¿De dónde viene el crecimiento?")
+        st.caption("Escenario base — capital que tú aportas vs rentabilidad generada por la inversión")
 
         fig_desglose = go.Figure()
-
-        fig_desglose.add_trace(
-            go.Scatter(
-                x=df_base["año"],
-                y=df_base["capital_propio"],
-                mode="lines",
-                name="Capital propio (inicial + aportaciones)",
-                line=dict(color="#1f77b4", width=0),
-                fill="tozeroy",
-                fillcolor="rgba(31, 119, 180, 0.4)",
-                stackgroup="uno",
-            )
-        )
-
-        fig_desglose.add_trace(
-            go.Scatter(
-                x=df_base["año"],
-                y=df_base["rentabilidad_generada"],
-                mode="lines",
-                name="Rentabilidad generada",
-                line=dict(color="#2ca02c", width=0),
-                fill="tonexty",
-                fillcolor="rgba(44, 160, 44, 0.4)",
-                stackgroup="uno",
-            )
-        )
-
+        fig_desglose.add_trace(go.Scatter(
+            x=df_base["año"], y=df_base["capital_propio"],
+            mode="lines", name="Capital propio (inicial + ahorros)",
+            line=dict(color="#1f77b4", width=0),
+            fill="tozeroy", fillcolor="rgba(31,119,180,0.4)",
+            stackgroup="uno",
+        ))
+        fig_desglose.add_trace(go.Scatter(
+            x=df_base["año"], y=df_base["rentabilidad_generada"],
+            mode="lines", name="Rentabilidad generada",
+            line=dict(color="#2ca02c", width=0),
+            fill="tonexty", fillcolor="rgba(44,160,44,0.4)",
+            stackgroup="uno",
+        ))
         fig_desglose.update_layout(
             xaxis_title="Años",
             yaxis_title="Patrimonio (€)",
@@ -692,47 +747,22 @@ elif pagina == "📈 Proyección / escenarios":
             margin=dict(t=60, b=40, l=40, r=40),
             hovermode="x unified",
         )
-
         st.plotly_chart(fig_desglose, use_container_width=True)
 
-        # Métricas finales del desglose
+        # KPIs finales
         ultimo = df_base.iloc[-1]
         col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric(
-                "Patrimonio final (base)",
-                format_eur(ultimo["patrimonio"]),
-                help="Valor total al final del horizonte en el escenario base"
-            )
+            st.metric("Patrimonio final (base)", format_eur(ultimo["patrimonio"]),
+                help=f"Valor total al cabo de {horizonte} años en escenario base")
         with col2:
-            st.metric(
-                "Capital propio aportado",
-                format_eur(ultimo["capital_propio"]),
-                help="Tu patrimonio inicial más todas las aportaciones mensuales acumuladas"
-            )
+            st.metric("Capital propio aportado", format_eur(ultimo["capital_propio"]),
+                help="Tu patrimonio inicial más todos los ahorros acumulados")
         with col3:
-            st.metric(
-                "Rentabilidad generada",
-                format_eur(ultimo["rentabilidad_generada"]),
-                help="Lo que ha crecido tu dinero solo, gracias al interés compuesto"
-            )
+            st.metric("Rentabilidad generada", format_eur(ultimo["rentabilidad_generada"]),
+                help="Lo que ha crecido tu dinero gracias al interés compuesto")
 
-        # Tabla resumen escenarios
-        st.subheader("Patrimonio final por escenario")
-        escenarios_rows = []
-        for h in [5, 10, 20]:
-            df_b = calc_proyeccion_patrimonio(patrimonio_total, aportacion_mensual, rent_base, h)
-            df_o = calc_proyeccion_patrimonio(patrimonio_total, aportacion_mensual, rent_opt, h)
-            df_p = calc_proyeccion_patrimonio(patrimonio_total, aportacion_mensual, rent_pes, h)
-            escenarios_rows.append({
-                "Horizonte": f"{h} años",
-                "Pesimista": format_eur(df_p.iloc[-1]["patrimonio"]),
-                "Base": format_eur(df_b.iloc[-1]["patrimonio"]),
-                "Optimista": format_eur(df_o.iloc[-1]["patrimonio"]),
-            })
-        st.dataframe(pd.DataFrame(escenarios_rows), use_container_width=True, hide_index=True)
-
-        # Años hasta alcanzar objetivo
+        # Años hasta objetivo
         st.subheader("¿Cuándo alcanzarás tu objetivo?")
         objetivo_val = st.number_input(
             "Patrimonio objetivo (€)",
@@ -741,9 +771,10 @@ elif pagina == "📈 Proyección / escenarios":
             step=1000.0,
             format="%.0f",
         )
-
         superado = df_base[df_base["patrimonio"] >= objetivo_val]
-        if not superado.empty:
+        if patrimonio_total >= objetivo_val:
+            st.success("¡Ya has alcanzado ese objetivo!")
+        elif not superado.empty:
             mes_objetivo = int(superado.iloc[0]["mes"])
             anos_obj = mes_objetivo // 12
             meses_obj = mes_objetivo % 12
@@ -751,11 +782,9 @@ elif pagina == "📈 Proyección / escenarios":
                 f"Años hasta {format_eur(objetivo_val)} (escenario base)",
                 f"{anos_obj} años y {meses_obj} meses",
             )
-        elif patrimonio_total >= objetivo_val:
-            st.success("¡Ya has alcanzado ese objetivo!")
         else:
-            st.warning(f"No se alcanza {format_eur(objetivo_val)} en el horizonte de {horizonte} años con estos parámetros.")
+            st.warning(f"No se alcanza {format_eur(objetivo_val)} en {horizonte} años con estos parámetros.")
 
     except Exception as e:
-        st.error(f"Error inesperado: {e}")
+        st.error(f"Error inesperado en Proyección: {e}")
         st.stop()
