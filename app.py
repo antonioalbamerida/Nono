@@ -490,6 +490,8 @@ def calc_proyeccion_patrimonio(
     cartera = cartera_inicial
     liquidez = patrimonio_inicial - cartera_inicial
     aportaciones_acum = 0.0
+    aportaciones_cartera_acum = 0.0
+    aportaciones_liquidez_acum = 0.0
 
     # Punto inicial (mes 0) para que la proyección arranque exactamente
     # en el mismo patrimonio total mostrado en la pestaña de Patrimonio.
@@ -500,6 +502,8 @@ def calc_proyeccion_patrimonio(
         "cartera": cartera,
         "liquidez": liquidez,
         "capital_propio": patrimonio_inicial,
+        "capital_invertido": cartera_inicial,
+        "capital_ahorrado": patrimonio_inicial - cartera_inicial,
         "rentabilidad_generada": 0.0,
     })
 
@@ -524,9 +528,13 @@ def calc_proyeccion_patrimonio(
         cartera += aportacion_cartera
         liquidez += aportacion_liquidez
         aportaciones_acum += ahorro_mes
+        aportaciones_cartera_acum += aportacion_cartera
+        aportaciones_liquidez_acum += aportacion_liquidez
 
         patrimonio_total = cartera + liquidez
         capital_propio = patrimonio_inicial + aportaciones_acum
+        capital_invertido = cartera_inicial + aportaciones_cartera_acum
+        capital_ahorrado = (patrimonio_inicial - cartera_inicial) + aportaciones_liquidez_acum
         rentabilidad_generada = patrimonio_total - capital_propio
 
         registros.append({
@@ -536,6 +544,8 @@ def calc_proyeccion_patrimonio(
             "cartera": cartera,
             "liquidez": liquidez,
             "capital_propio": capital_propio,
+            "capital_invertido": capital_invertido,
+            "capital_ahorrado": capital_ahorrado,
             "rentabilidad_generada": rentabilidad_generada,
         })
 
@@ -1172,14 +1182,24 @@ elif pagina == "📈 Proyección / escenarios":
 
         # Gráfico desglose capital propio vs rentabilidad
         st.subheader("¿De dónde viene el crecimiento?")
-        st.caption("Escenario base — capital que tú aportas vs rentabilidad generada por la inversión")
+        st.caption(
+            "Escenario base — desglose del patrimonio entre capital aportado a inversiones, "
+            "capital ahorrado en liquidez y rentabilidad generada por la inversión."
+        )
 
         fig_desglose = go.Figure()
         fig_desglose.add_trace(go.Scatter(
-            x=df_base["año"], y=df_base["capital_propio"],
-            mode="lines", name="Capital propio (inicial + ahorros)",
+            x=df_base["año"], y=df_base["capital_ahorrado"],
+            mode="lines", name="Capital ahorrado (liquidez)",
+            line=dict(color="#aec7e8", width=0),
+            fill="tozeroy", fillcolor="rgba(174,199,232,0.5)",
+            stackgroup="uno",
+        ))
+        fig_desglose.add_trace(go.Scatter(
+            x=df_base["año"], y=df_base["capital_invertido"],
+            mode="lines", name="Capital aportado a inversiones",
             line=dict(color="#1f77b4", width=0),
-            fill="tozeroy", fillcolor="rgba(31,119,180,0.4)",
+            fill="tonexty", fillcolor="rgba(31,119,180,0.5)",
             stackgroup="uno",
         ))
         fig_desglose.add_trace(go.Scatter(
@@ -1200,14 +1220,17 @@ elif pagina == "📈 Proyección / escenarios":
 
         # KPIs finales
         ultimo = df_base.iloc[-1]
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Patrimonio final (base)", format_eur(ultimo["patrimonio"]),
                 help=f"Valor total al cabo de {horizonte} años en escenario base")
         with col2:
-            st.metric("Capital propio aportado", format_eur(ultimo["capital_propio"]),
-                help="Tu patrimonio inicial más todos los ahorros acumulados")
+            st.metric("Capital aportado a inversiones", format_eur(ultimo["capital_invertido"]),
+                help="Capital inicial invertido más todas las aportaciones a cartera acumuladas")
         with col3:
+            st.metric("Capital ahorrado (liquidez)", format_eur(ultimo["capital_ahorrado"]),
+                help="Liquidez inicial más todo el ahorro no invertido acumulado")
+        with col4:
             st.metric("Rentabilidad generada", format_eur(ultimo["rentabilidad_generada"]),
                 help="Lo que ha crecido tu dinero gracias al interés compuesto")
 
