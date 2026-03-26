@@ -10,6 +10,11 @@ import unicodedata
 
 st.set_page_config(page_title="nONO Dashboard", layout="wide")
 
+MONTHS_ORDER = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+]
+
 
 # ============================================================
 # BLOQUE 2 — Utilidades
@@ -337,12 +342,8 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
     ahorro_diciembre = nomina_mensual + paga_extra_diciembre - gasto_mensual
     ahorro_mensual_medio = ahorro_anual / 12
 
-    meses = [
-        "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-        "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-    ]
     detalle_rows = []
-    for mes in meses:
+    for mes in MONTHS_ORDER:
         es_mes_paga = mes in {"Junio", "Diciembre"}
         paga_extra = 0.0
         if mes == "Junio":
@@ -361,6 +362,10 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
         })
 
     detalle_mensual_df = pd.DataFrame(detalle_rows)
+    detalle_mensual_df["Mes"] = pd.Categorical(
+        detalle_mensual_df["Mes"], categories=MONTHS_ORDER, ordered=True
+    )
+    detalle_mensual_df = detalle_mensual_df.sort_values("Mes").reset_index(drop=True)
 
     return {
         "ingresos_df": ingresos,
@@ -915,6 +920,7 @@ elif pagina == "💶 Presupuesto y cash flow":
             x="Mes",
             y="Ahorro del mes",
             color="Tipo de mes",
+            category_orders={"Mes": MONTHS_ORDER},
             color_discrete_map={
                 "Mes normal": "#1f77b4",
                 "Mes con paga extra": "#2ca02c",
