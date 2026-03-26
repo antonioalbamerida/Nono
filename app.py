@@ -193,8 +193,17 @@ def calc_comparacion_cartera(
 
 
 def _merge_actual_objetivo(actual_df: pd.DataFrame, objetivo_df: pd.DataFrame) -> pd.DataFrame:
-    act = actual_df[["ISIN", "Fondo", "Tipo de activo", "Importe actual"]].copy()
-    act.columns = ["ISIN", "Fondo", "Tipo", "importe_actual"]
+    act = actual_df[
+        ["ISIN", "Fondo", "Tipo de activo", "Importe actual", "Rentabilidad %", "Rentabilidad en Euros"]
+    ].copy()
+    act.columns = [
+        "ISIN",
+        "Fondo",
+        "Tipo",
+        "importe_actual",
+        "rentabilidad_pct",
+        "rentabilidad_eur",
+    ]
 
     obj = objetivo_df[["ISIN", "Fondo", "Tipo de activo", "Peso"]].copy()
     obj.columns = ["ISIN", "Fondo_obj", "Tipo_obj", "peso_objetivo"]
@@ -202,10 +211,23 @@ def _merge_actual_objetivo(actual_df: pd.DataFrame, objetivo_df: pd.DataFrame) -
     merged = act.merge(obj, on="ISIN", how="outer")
     merged["importe_actual"] = pd.to_numeric(merged["importe_actual"], errors="coerce").fillna(0.0)
     merged["peso_objetivo"] = pd.to_numeric(merged["peso_objetivo"], errors="coerce").fillna(0.0)
+    merged["rentabilidad_pct"] = pd.to_numeric(merged["rentabilidad_pct"], errors="coerce").fillna(0.0)
+    merged["rentabilidad_eur"] = pd.to_numeric(merged["rentabilidad_eur"], errors="coerce").fillna(0.0)
     merged["Fondo"] = merged["Fondo"].fillna(merged["Fondo_obj"]).fillna("Sin nombre")
     merged["Tipo"] = merged["Tipo"].fillna(merged["Tipo_obj"]).fillna("Otros")
     merged["Tipo agrupado"] = merged["Tipo"].apply(normalize_tipo_activo)
-    return merged[["ISIN", "Fondo", "Tipo", "Tipo agrupado", "importe_actual", "peso_objetivo"]].copy()
+    return merged[
+        [
+            "ISIN",
+            "Fondo",
+            "Tipo",
+            "Tipo agrupado",
+            "importe_actual",
+            "peso_objetivo",
+            "rentabilidad_pct",
+            "rentabilidad_eur",
+        ]
+    ].copy()
 
 
 def calc_rebalanceo_actual_vs_objetivo(actual_df: pd.DataFrame, objetivo_df: pd.DataFrame) -> pd.DataFrame:
@@ -603,6 +625,8 @@ elif pagina == "📊 Cartera actual vs objetivo":
             tabla = rebalanceo_df.copy()
             tabla["Peso actual %"] = tabla["peso_actual"] * 100
             tabla["Peso objetivo %"] = tabla["peso_objetivo"] * 100
+            tabla["Rentabilidad %"] = tabla["rentabilidad_pct"] * 100
+            tabla["Rentabilidad €"] = tabla["rentabilidad_eur"]
             tabla["Gap pp"] = tabla["gap_pp"]
             tabla["Importe actual €"] = tabla["importe_actual"]
             tabla["Importe objetivo €"] = tabla["importe_objetivo_rebalanceo"]
@@ -619,8 +643,9 @@ elif pagina == "📊 Cartera actual vs objetivo":
             tabla["Fondo"] = tabla["Fondo"].astype(str)
             tabla = tabla[
                 [
-                    "Fondo", "Tipo", "Importe actual €", "Peso actual %", "Peso objetivo %",
-                    "Gap pp", "estado", "Importe objetivo €", "Acción rebalanceo"
+                    "Fondo", "Tipo", "Importe actual €", "Rentabilidad €", "Rentabilidad %",
+                    "Peso actual %", "Peso objetivo %", "Gap pp", "estado",
+                    "Importe objetivo €", "Acción rebalanceo"
                 ]
             ].rename(columns={"estado": "Estado"})
 
@@ -631,6 +656,8 @@ elif pagina == "📊 Cartera actual vs objetivo":
                 hide_index=True,
                 column_config={
                     "Importe actual €": st.column_config.NumberColumn(format="%.2f"),
+                    "Rentabilidad €": st.column_config.NumberColumn(format="%+.2f"),
+                    "Rentabilidad %": st.column_config.NumberColumn(format="%+.2f%%"),
                     "Peso actual %": st.column_config.NumberColumn(format="%.2f"),
                     "Peso objetivo %": st.column_config.NumberColumn(format="%.2f"),
                     "Gap pp": st.column_config.NumberColumn(format="%+.2f"),
@@ -713,6 +740,8 @@ elif pagina == "📊 Cartera actual vs objetivo":
             tabla_plan = plan_df.copy()
             tabla_plan["Peso actual %"] = tabla_plan["peso_actual"] * 100
             tabla_plan["Peso objetivo %"] = tabla_plan["peso_objetivo"] * 100
+            tabla_plan["Rentabilidad %"] = tabla_plan["rentabilidad_pct"] * 100
+            tabla_plan["Rentabilidad €"] = tabla_plan["rentabilidad_eur"]
             tabla_plan["Importe actual €"] = tabla_plan["importe_actual"]
             tabla_plan["Importe objetivo €"] = tabla_plan["importe_objetivo_aportacion"]
             tabla_plan["Aportación necesaria €"] = tabla_plan["aportacion_necesaria"]
@@ -722,8 +751,9 @@ elif pagina == "📊 Cartera actual vs objetivo":
 
             tabla_plan = tabla_plan[
                 [
-                    "Fondo", "Tipo", "Importe actual €", "Peso actual %",
-                    "Peso objetivo %", "Importe objetivo €", "Aportación necesaria €", "prioridad"
+                    "Fondo", "Tipo", "Importe actual €", "Rentabilidad €", "Rentabilidad %",
+                    "Peso actual %", "Peso objetivo %", "Importe objetivo €",
+                    "Aportación necesaria €", "prioridad"
                 ]
             ].rename(columns={"prioridad": "Prioridad"})
 
@@ -734,6 +764,8 @@ elif pagina == "📊 Cartera actual vs objetivo":
                 hide_index=True,
                 column_config={
                     "Importe actual €": st.column_config.NumberColumn(format="%.2f"),
+                    "Rentabilidad €": st.column_config.NumberColumn(format="%+.2f"),
+                    "Rentabilidad %": st.column_config.NumberColumn(format="%+.2f%%"),
                     "Peso actual %": st.column_config.NumberColumn(format="%.2f"),
                     "Peso objetivo %": st.column_config.NumberColumn(format="%.2f"),
                     "Importe objetivo €": st.column_config.NumberColumn(format="%.2f"),
