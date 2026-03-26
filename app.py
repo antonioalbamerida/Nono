@@ -814,24 +814,25 @@ elif pagina == "💶 Presupuesto y cash flow":
         presupuesto_df = load_presupuesto()
         pres = calc_presupuesto(presupuesto_df)
 
-        # BLOQUE 1 — KPIs principales
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
+        # BLOQUE 1 — KPIs principales (rejilla 3x2 para mantener alineación visual)
+        tasa = (pres["ahorro_anual"] / pres["ingreso_anual"] * 100) if pres["ingreso_anual"] > 0 else 0.0
+
+        fila_1 = st.columns(3)
+        with fila_1[0]:
             st.metric("Ingreso anual", format_eur(pres["ingreso_anual"]))
-        with col2:
+        with fila_1[1]:
             st.metric("Gasto anual", format_eur(pres["gasto_anual"]))
-        with col3:
+        with fila_1[2]:
             st.metric("Ahorro anual", format_eur(pres["ahorro_anual"]))
-        with col4:
+
+        fila_2 = st.columns(3)
+        with fila_2[0]:
             st.metric(
                 "Ahorro mensual base",
                 format_eur(pres["ahorro_mensual_base"]),
                 help="Ahorro típico de un mes ordinario sin pagas extra.",
             )
-
-        # BLOQUE 2 — KPI promedio mensual anual
-        _, col_med, _ = st.columns(3)
-        with col_med:
+        with fila_2[1]:
             st.metric(
                 "Ahorro mensual medio anual",
                 format_eur(pres["ahorro_mensual_medio"]),
@@ -840,18 +841,14 @@ elif pagina == "💶 Presupuesto y cash flow":
                     "(incluye el efecto de las pagas extra repartido en todo el año)."
                 ),
             )
-
-        # BLOQUE 3 — Tasa de ahorro
-        tasa = (pres["ahorro_anual"] / pres["ingreso_anual"] * 100) if pres["ingreso_anual"] > 0 else 0.0
-        _, col_tasa, _ = st.columns(3)
-        with col_tasa:
+        with fila_2[2]:
             st.metric(
                 "Tasa de ahorro",
                 f"{tasa:.1f}%",
                 help="Porcentaje de tus ingresos anuales que ahorras. Objetivo recomendado: >20%",
             )
 
-        # BLOQUE 4 — Tablas de ingresos y gastos
+        # BLOQUE 2 — Tablas de ingresos y gastos
         st.markdown("---")
         col_ing, col_gas = st.columns(2)
 
