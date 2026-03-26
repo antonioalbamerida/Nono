@@ -127,13 +127,20 @@ def calc_resumen_cartera(cartera_df: pd.DataFrame) -> dict:
     }
 
 
-def calc_comparacion_cartera(actual_df: pd.DataFrame, objetivo_df: pd.DataFrame) -> pd.DataFrame:
+def calc_comparacion_cartera(
+    actual_df: pd.DataFrame,
+    objetivo_df: pd.DataFrame,
+    patrimonio_total: float,
+    pct_objetivo: float = 0.60,
+) -> pd.DataFrame:
     """
     Merge actual vs objetivo por ISIN.
-    peso_actual se recalcula desde cero (importe_actual / total_actual).
-    No se usa la columna Peso actual del Excel para evitar inconsistencias.
+    - peso_actual: recalculado desde cero (importe_actual / total_actual)
+    - importe_objetivo: peso_objetivo × (patrimonio_total × pct_objetivo)
+    - Los importes del Excel de Cartera objetivo se ignoran, solo se usan sus pesos
     """
     total_actual = actual_df["Importe actual"].sum()
+    cartera_objetivo_eur = patrimonio_total * pct_objetivo
 
     act = actual_df[["ISIN", "Fondo", "Tipo de activo", "Importe actual"]].copy()
     act.columns = ["ISIN", "Fondo", "Tipo", "importe_actual"]
@@ -146,7 +153,9 @@ def calc_comparacion_cartera(actual_df: pd.DataFrame, objetivo_df: pd.DataFrame)
     merged["peso_objetivo"] = merged["peso_objetivo"].fillna(0)
 
     # Recalcular peso_actual desde cero
-    merged["peso_actual"] = merged["importe_actual"] / total_actual if total_actual > 0 else 0.0
+    merged["peso_actual"] = (
+        merged["importe_actual"] / total_actual if total_actual > 0 else 0.0
+    )
 
     # Para fondos solo en objetivo, recuperar nombre y tipo
     for idx, row in merged[merged["Fondo"].isna()].iterrows():
@@ -156,7 +165,8 @@ def calc_comparacion_cartera(actual_df: pd.DataFrame, objetivo_df: pd.DataFrame)
             merged.at[idx, "Tipo"] = match.iloc[0]["Tipo de activo"]
 
     merged["desviacion"] = merged["peso_actual"] - merged["peso_objetivo"]
-    merged["importe_objetivo"] = merged["peso_objetivo"] * total_actual
+    # Importe objetivo basado en 60% del patrimonio total, no en el Excel
+    merged["importe_objetivo"] = merged["peso_objetivo"] * cartera_objetivo_eur
     merged["accion_eur"] = merged["importe_objetivo"] - merged["importe_actual"]
 
     return merged.sort_values("peso_objetivo", ascending=False).reset_index(drop=True)
@@ -366,18 +376,13 @@ if pagina == "🏦 Patrimonio":
         with col_donut:
             st.subheader("Distribución del patrimonio")
 
-            # Construir DataFrame combinando liquidez en cuentas + tipos de cartera
             cuentas_total = patrimonio_df["Importe"].sum() - resumen["total_actual"]
-
             por_tipo_agrupado = resumen["por_tipo_agrupado"].copy()
-
-            # Añadir fila de liquidez en cuentas
             fila_liquidez = pd.DataFrame([{
                 "Tipo agrupado": "Liquidez en cuentas",
                 "Importe actual": cuentas_total
             }])
             por_tipo_completo = pd.concat([fila_liquidez, por_tipo_agrupado], ignore_index=True)
-            # Filtrar categorías con importe > 0
             por_tipo_completo = por_tipo_completo[por_tipo_completo["Importe actual"] > 0]
 
             fig_donut = px.pie(
@@ -424,7 +429,9 @@ elif pagina == "📊 Cartera actual vs objetivo":
         cartera_actual_df = load_cartera_actual()
         cartera_objetivo_df = load_cartera_objetivo()
 
-        comp = calc_comparacion_cartera(cartera_actual_df, cartera_objetivo_df)
+        patrimonio_df = load_patrimonio()
+        patrimonio_total = calc_patrimonio_total(patrimonio_df)
+        comp = calc_comparacion_cartera(cartera_actual_df, cartera_objetivo_df, patrimonio_total)
 
         # Preparar tabla de visualización
         tabla = comp.copy()
@@ -497,20 +504,19 @@ elif pagina == "📊 Cartera actual vs objetivo":
 
         st.subheader("Simulador: ¿cuánto necesitas para llegar al objetivo?")
         st.caption(
-            "Calcula cuánto deberías tener en cada fondo según los pesos objetivo, "
-            "para un tamaño de cartera determinado."
+            "Los pesos objetivo vienen del Excel. El importe objetivo por defecto "
+            "es el 60% de tu patrimonio total. Mueve el slider para simular otros escenarios."
         )
 
-        cartera_objetivo_total = cartera_objetivo_df["Importe"].sum()
-        total_actual = cartera_actual_df["Importe actual"].sum()
+        cartera_objetivo_eur = patrimonio_total * 0.60
 
         patrimonio_slider = st.slider(
             "Cartera objetivo total (€)",
-            min_value=int(round(total_actual / 500) * 500),
+            min_value=int(round(cartera_actual_df["Importe actual"].sum() / 500) * 500),
             max_value=50000,
             step=500,
-            value=int(round(cartera_objetivo_total / 500) * 500),
-            help="Tamaño total de cartera al que quieres llegar. Por defecto, el objetivo definido en el Excel."
+            value=int(round(cartera_objetivo_eur / 500) * 500),
+            help="Por defecto el 60% de tu patrimonio total. Ajústalo para simular otros escenarios."
         )
 
         sim = comp.copy()
