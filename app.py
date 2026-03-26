@@ -1067,33 +1067,6 @@ elif pagina == "📈 Proyección / escenarios":
         )
         st.plotly_chart(fig_proy, use_container_width=True)
 
-        # Desglose explícito entre patrimonio invertido y no invertido (escenario base)
-        st.subheader("Desglose: invertido vs no invertido (escenario base)")
-        col_inv, col_liq = st.columns(2)
-        with col_inv:
-            st.metric("Patrimonio invertido inicial", format_eur(cartera_inicial))
-        with col_liq:
-            st.metric("Patrimonio no invertido inicial", format_eur(patrimonio_total - cartera_inicial))
-
-        fig_mix = go.Figure()
-        fig_mix.add_trace(go.Scatter(
-            x=df_base["año"], y=df_base["cartera"],
-            mode="lines", name="Invertido (cartera)",
-            line=dict(color="#1f77b4", width=2),
-        ))
-        fig_mix.add_trace(go.Scatter(
-            x=df_base["año"], y=df_base["liquidez"],
-            mode="lines", name="No invertido (liquidez)",
-            line=dict(color="#ff7f0e", width=2, dash="dash"),
-        ))
-        fig_mix.update_layout(
-            xaxis_title="Años",
-            yaxis_title="Importe (€)",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            margin=dict(t=40, b=40, l=40, r=40),
-        )
-        st.plotly_chart(fig_mix, use_container_width=True)
-
         # Tabla resumen escenarios
         st.subheader("Patrimonio final por escenario")
         resumen_rows = []
