@@ -262,24 +262,9 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
     Nómina mensual × 12, pagas extra × 1 cada una.
     Gastos mensuales × 12.
     """
-    def _extrae_conceptos(df: pd.DataFrame, col_concepto: str, col_importe: str) -> pd.DataFrame:
-        """
-        Extrae pares concepto/importe soportando celdas combinadas del Excel:
-        si el concepto está vacío pero hay importe, se hereda el último concepto válido.
-        """
-        subset = df[[col_concepto, col_importe]].copy()
-        subset[col_concepto] = subset[col_concepto].ffill()
-        subset[col_concepto] = subset[col_concepto].astype(str).str.strip()
-        subset[col_importe] = pd.to_numeric(subset[col_importe], errors="coerce")
-        subset = subset[
-            (subset[col_concepto] != "")
-            & (subset[col_concepto].str.lower() != "nan")
-            & pd.notna(subset[col_importe])
-        ].copy()
-        subset.columns = ["concepto", "importe"]
-        return subset
-
-    ingresos = _extrae_conceptos(presupuesto_df, "Ingresos", "Importe")
+    ingresos = presupuesto_df[["Ingresos", "Importe"]].dropna(subset=["Ingresos"])
+    ingresos = ingresos[ingresos["Ingresos"].astype(str).str.strip() != ""].copy()
+    ingresos.columns = ["concepto", "importe"]
 
     if "Importe.1" in presupuesto_df.columns:
         importe1_col = "Importe.1"
@@ -293,7 +278,9 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
                 f"Columnas disponibles: {list(presupuesto_df.columns)}"
             )
 
-    gastos = _extrae_conceptos(presupuesto_df, "Gastos", importe1_col)
+    gastos = presupuesto_df[["Gastos", importe1_col]].dropna(subset=["Gastos"])
+    gastos = gastos[gastos["Gastos"].astype(str).str.strip() != ""].copy()
+    gastos.columns = ["concepto", "importe"]
 
     def _normaliza_concepto(texto: str) -> str:
         txt = unicodedata.normalize("NFKD", str(texto))
@@ -310,15 +297,12 @@ def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
         if pd.isna(importe):
             continue
 
-        if "nomina" in concepto_norm or "mensual" in concepto_norm:
+        if "nomina" in concepto_norm:
             nomina_anual += float(importe) * 12
         elif "junio" in concepto_norm:
             paga_extra_junio += float(importe)
         elif "diciembre" in concepto_norm:
             paga_extra_diciembre += float(importe)
-        else:
-            # Si no se reconoce el patrón, tratamos el ingreso como recurrente mensual
-            nomina_anual += float(importe) * 12
 
     gasto_mensual = pd.to_numeric(gastos["importe"], errors="coerce").fillna(0.0).sum()
     gasto_anual = gasto_mensual * 12
@@ -808,21 +792,22 @@ elif pagina == "💶 Presupuesto y cash flow":
                 help="Ahorro típico de un mes ordinario sin pagas extra.",
             )
 
-        # BLOQUE 2 — KPIs complementarios (alineados con la rejilla de 4 columnas)
-        col5, col6, _, _ = st.columns(4)
-        with col5:
+        # BLOQUE 2 — KPI promedio mensual anual
+        _, col_med, _ = st.columns(3)
+        with col_med:
             st.metric(
                 "Ahorro mensual medio anual",
                 format_eur(pres["ahorro_mensual_medio"]),
                 help=(
-                    "Ahorro anual ÷ 12, incluyendo el efecto "
-                    "de las pagas extra repartido en todo el año."
+                    "Se calcula como: ahorro anual ÷ 12 "
+                    "(incluye el efecto de las pagas extra repartido en todo el año)."
                 ),
             )
 
         # BLOQUE 3 — Tasa de ahorro
         tasa = (pres["ahorro_anual"] / pres["ingreso_anual"] * 100) if pres["ingreso_anual"] > 0 else 0.0
-        with col6:
+        _, col_tasa, _ = st.columns(3)
+        with col_tasa:
             st.metric(
                 "Tasa de ahorro",
                 f"{tasa:.1f}%",
@@ -893,38 +878,18 @@ elif pagina == "💶 Presupuesto y cash flow":
 
         # BLOQUE 7 — Gráfico mensual de ahorro real
         st.subheader("Gráfico mensual de ahorro real")
-        meses_orden = [
-            "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-            "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-        ]
-        detalle_mensual_plot = pres["detalle_mensual_df"].copy()
-        detalle_mensual_plot["Mes"] = pd.Categorical(
-            detalle_mensual_plot["Mes"],
-            categories=meses_orden,
-            ordered=True,
-        )
-        detalle_mensual_plot = detalle_mensual_plot.sort_values("Mes")
-
         fig_ahorro_mes = px.bar(
-            detalle_mensual_plot,
+            pres["detalle_mensual_df"],
             x="Mes",
             y="Ahorro del mes",
             color="Tipo de mes",
-            category_orders={"Mes": meses_orden},
             color_discrete_map={
                 "Mes normal": "#1f77b4",
                 "Mes con paga extra": "#2ca02c",
             },
             labels={"Ahorro del mes": "Ahorro del mes (€)"},
         )
-        fig_ahorro_mes.update_layout(
-            margin=dict(t=30, b=30, l=30, r=30),
-            legend_title_text="",
-            xaxis={
-                "categoryorder": "array",
-                "categoryarray": meses_orden,
-            },
-        )
+        fig_ahorro_mes.update_layout(margin=dict(t=30, b=30, l=30, r=30), legend_title_text="")
         st.plotly_chart(fig_ahorro_mes, use_container_width=True)
 
         # BLOQUE 8 — Texto de apoyo
