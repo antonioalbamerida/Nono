@@ -441,6 +441,18 @@ def calc_proyeccion_patrimonio(
     liquidez = patrimonio_inicial - cartera_inicial
     aportaciones_acum = 0.0
 
+    # Punto inicial (mes 0) para que la proyección arranque exactamente
+    # en el mismo patrimonio total mostrado en la pestaña de Patrimonio.
+    registros.append({
+        "mes": 0,
+        "año": 0.0,
+        "patrimonio": patrimonio_inicial,
+        "cartera": cartera,
+        "liquidez": liquidez,
+        "capital_propio": patrimonio_inicial,
+        "rentabilidad_generada": 0.0,
+    })
+
     for m in range(1, años * 12 + 1):
         mes_del_año = ((m - 1) % 12)  # 0=enero, 5=junio, 11=diciembre
         ahorro_mes = ahorros_mensuales[mes_del_año]
@@ -1017,6 +1029,10 @@ elif pagina == "📈 Proyección / escenarios":
 
         # Gráfico escenarios
         st.subheader("Evolución del patrimonio total")
+        st.caption(
+            "La rentabilidad se aplica únicamente al patrimonio invertido (cartera). "
+            "La parte no invertida (liquidez) no genera rentabilidad en esta simulación."
+        )
         fig_proy = go.Figure()
 
         fig_proy.add_trace(go.Scatter(
@@ -1050,6 +1066,33 @@ elif pagina == "📈 Proyección / escenarios":
             margin=dict(t=60, b=40, l=40, r=40),
         )
         st.plotly_chart(fig_proy, use_container_width=True)
+
+        # Desglose explícito entre patrimonio invertido y no invertido (escenario base)
+        st.subheader("Desglose: invertido vs no invertido (escenario base)")
+        col_inv, col_liq = st.columns(2)
+        with col_inv:
+            st.metric("Patrimonio invertido inicial", format_eur(cartera_inicial))
+        with col_liq:
+            st.metric("Patrimonio no invertido inicial", format_eur(patrimonio_total - cartera_inicial))
+
+        fig_mix = go.Figure()
+        fig_mix.add_trace(go.Scatter(
+            x=df_base["año"], y=df_base["cartera"],
+            mode="lines", name="Invertido (cartera)",
+            line=dict(color="#1f77b4", width=2),
+        ))
+        fig_mix.add_trace(go.Scatter(
+            x=df_base["año"], y=df_base["liquidez"],
+            mode="lines", name="No invertido (liquidez)",
+            line=dict(color="#ff7f0e", width=2, dash="dash"),
+        ))
+        fig_mix.update_layout(
+            xaxis_title="Años",
+            yaxis_title="Importe (€)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            margin=dict(t=40, b=40, l=40, r=40),
+        )
+        st.plotly_chart(fig_mix, use_container_width=True)
 
         # Tabla resumen escenarios
         st.subheader("Patrimonio final por escenario")
