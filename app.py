@@ -32,13 +32,14 @@ def validate_columns(df: pd.DataFrame, required: list, sheet: str):
 def load_cartera_actual() -> pd.DataFrame:
     try:
         df = pd.read_excel("nONO.xlsx", sheet_name="informe cartera").copy()
+        df.columns = df.columns.str.strip()
         validate_columns(
             df,
-            ["Fondo", "ISIN", "Tipo de activo", "Importe inicial ", "Importe actual",
+            ["Fondo", "ISIN", "Tipo de activo", "Importe inicial", "Importe actual",
              "Rentabilidad %", "Rentabilidad en Euros"],
             "informe cartera",
         )
-        for col in ["Importe inicial ", "Importe actual", "Rentabilidad %", "Rentabilidad en Euros"]:
+        for col in ["Importe inicial", "Importe actual", "Rentabilidad %", "Rentabilidad en Euros"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df[pd.notna(df["ISIN"])].copy()
         return df
@@ -51,6 +52,7 @@ def load_cartera_actual() -> pd.DataFrame:
 def load_cartera_objetivo() -> pd.DataFrame:
     try:
         df = pd.read_excel("nONO.xlsx", sheet_name="Cartera objetivo").copy()
+        df.columns = df.columns.str.strip()
         validate_columns(df, ["Fondo", "ISIN", "Tipo de activo", "Importe", "Peso"], "Cartera objetivo")
         for col in ["Peso", "Importe"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -65,6 +67,7 @@ def load_cartera_objetivo() -> pd.DataFrame:
 def load_patrimonio() -> pd.DataFrame:
     try:
         df = pd.read_excel("nONO.xlsx", sheet_name="Patrimonio actual").copy()
+        df.columns = df.columns.str.strip()
         validate_columns(df, ["Banco", "Importe"], "Patrimonio actual")
         df["Importe"] = pd.to_numeric(df["Importe"], errors="coerce")
         df = df[df["Banco"] != "Total"].copy()
@@ -97,18 +100,34 @@ MAPA_TIPOS = {
     "Renta fija IA": "Renta Fija",
     "Renta fija HY": "Renta Fija",
     "Renta fija IG": "Renta Fija",
+    "Renta fija Yield": "Renta Fija",
+    "Renta fija yeld": "Renta Fija",
+    "Renta fija high yield": "Renta Fija",
+    "Renta fija high-yield": "Renta Fija",
+    "Renta fija flexible": "Renta Fija",
+    "Renta fija": "Renta Fija",
     "Mixto flexible Conservador": "Mixto",
     "Mixto flexible Agresivo": "Mixto",
+    "Mixto": "Mixto",
     "Renta variable global": "Renta Variable",
     "Renta variable USA": "Renta Variable",
     "Renta variable Europa": "Renta Variable",
     "Renta variable small caps": "Renta Variable",
+    "Renta variable emergente": "Renta Variable",
+    "Renta variable": "Renta Variable",
 }
+
+
+def normalize_tipo_activo(tipo: str) -> str:
+    if pd.isna(tipo):
+        return "Otros"
+    tipo_txt = str(tipo).strip()
+    return MAPA_TIPOS.get(tipo_txt, "Otros")
 
 
 def calc_resumen_cartera(cartera_df: pd.DataFrame) -> dict:
     """Devuelve dict con: total_inicial, total_actual, rentabilidad_eur, rentabilidad_pct, por_tipo, por_tipo_agrupado"""
-    total_inicial = cartera_df["Importe inicial "].sum()
+    total_inicial = cartera_df["Importe inicial"].sum()
     total_actual = cartera_df["Importe actual"].sum()
     rent_eur = cartera_df["Rentabilidad en Euros"].sum()
     rent_pct = (total_actual - total_inicial) / total_inicial if total_inicial > 0 else 0
@@ -170,6 +189,69 @@ def calc_comparacion_cartera(
     merged["accion_eur"] = merged["importe_objetivo"] - merged["importe_actual"]
 
     return merged.sort_values("peso_objetivo", ascending=False).reset_index(drop=True)
+
+
+def _merge_actual_objetivo(actual_df: pd.DataFrame, objetivo_df: pd.DataFrame) -> pd.DataFrame:
+    act = actual_df[["ISIN", "Fondo", "Tipo de activo", "Importe actual"]].copy()
+    act.columns = ["ISIN", "Fondo", "Tipo", "importe_actual"]
+
+    obj = objetivo_df[["ISIN", "Fondo", "Tipo de activo", "Peso"]].copy()
+    obj.columns = ["ISIN", "Fondo_obj", "Tipo_obj", "peso_objetivo"]
+
+    merged = act.merge(obj, on="ISIN", how="outer")
+    merged["importe_actual"] = pd.to_numeric(merged["importe_actual"], errors="coerce").fillna(0.0)
+    merged["peso_objetivo"] = pd.to_numeric(merged["peso_objetivo"], errors="coerce").fillna(0.0)
+    merged["Fondo"] = merged["Fondo"].fillna(merged["Fondo_obj"]).fillna("Sin nombre")
+    merged["Tipo"] = merged["Tipo"].fillna(merged["Tipo_obj"]).fillna("Otros")
+    merged["Tipo agrupado"] = merged["Tipo"].apply(normalize_tipo_activo)
+    return merged[["ISIN", "Fondo", "Tipo", "Tipo agrupado", "importe_actual", "peso_objetivo"]].copy()
+
+
+def calc_rebalanceo_actual_vs_objetivo(actual_df: pd.DataFrame, objetivo_df: pd.DataFrame) -> pd.DataFrame:
+    merged = _merge_actual_objetivo(actual_df, objetivo_df)
+    total_actual = merged["importe_actual"].sum()
+    merged["peso_actual"] = merged["importe_actual"] / total_actual if total_actual > 0 else 0.0
+    merged["gap_pp"] = (merged["peso_actual"] - merged["peso_objetivo"]) * 100
+    merged["importe_objetivo_rebalanceo"] = merged["peso_objetivo"] * total_actual
+    merged["accion_rebalanceo"] = merged["importe_objetivo_rebalanceo"] - merged["importe_actual"]
+
+    merged["estado"] = "En rango"
+    merged.loc[merged["gap_pp"] >= 1.0, "estado"] = "Sobreponderado"
+    merged.loc[merged["gap_pp"] <= -1.0, "estado"] = "Infraponderado"
+    return merged.sort_values("gap_pp", ascending=False).reset_index(drop=True)
+
+
+def calc_plan_aportaciones_60(
+    actual_df: pd.DataFrame,
+    objetivo_df: pd.DataFrame,
+    patrimonio_total: float
+) -> pd.DataFrame:
+    merged = _merge_actual_objetivo(actual_df, objetivo_df)
+    total_actual = merged["importe_actual"].sum()
+    cartera_objetivo_total = patrimonio_total * 0.60
+
+    merged["peso_actual"] = merged["importe_actual"] / total_actual if total_actual > 0 else 0.0
+    merged["gap_pp"] = (merged["peso_actual"] - merged["peso_objetivo"]) * 100
+    merged["importe_objetivo_aportacion"] = merged["peso_objetivo"] * cartera_objetivo_total
+    merged["aportacion_necesaria"] = merged["importe_objetivo_aportacion"] - merged["importe_actual"]
+
+    merged["prioridad"] = "Baja"
+    positivos_idx = merged[merged["aportacion_necesaria"] > 0].sort_values(
+        "aportacion_necesaria", ascending=False
+    ).index.tolist()
+    n = len(positivos_idx)
+    if n > 0:
+        top_cut = max(1, int(round(n / 3)))
+        mid_cut = max(top_cut + 1, int(round((2 * n) / 3)))
+        for i, idx in enumerate(positivos_idx):
+            if i < top_cut:
+                merged.at[idx, "prioridad"] = "Alta"
+            elif i < mid_cut:
+                merged.at[idx, "prioridad"] = "Media"
+            else:
+                merged.at[idx, "prioridad"] = "Baja"
+
+    return merged.sort_values("aportacion_necesaria", ascending=False).reset_index(drop=True)
 
 
 def calc_presupuesto(presupuesto_df: pd.DataFrame) -> dict:
@@ -428,112 +510,196 @@ elif pagina == "📊 Cartera actual vs objetivo":
     try:
         cartera_actual_df = load_cartera_actual()
         cartera_objetivo_df = load_cartera_objetivo()
-
         patrimonio_df = load_patrimonio()
         patrimonio_total = calc_patrimonio_total(patrimonio_df)
-        comp = calc_comparacion_cartera(cartera_actual_df, cartera_objetivo_df, patrimonio_total)
-
-        # Preparar tabla de visualización
-        tabla = comp.copy()
-        tabla["Fondo_corto"] = tabla["Fondo"].astype(str).str[:35]
-        tabla["Peso actual %"] = (tabla["peso_actual"] * 100).round(2)
-        tabla["Peso objetivo %"] = (tabla["peso_objetivo"] * 100).round(2)
-        tabla["Desviación pp"] = (tabla["desviacion"] * 100).round(2)
-        tabla["Importe actual €"] = tabla["importe_actual"].round(2)
-        tabla["Acción"] = tabla["accion_eur"].apply(
-            lambda x: f"Comprar {format_eur(abs(x))}" if x > 0 else (f"Vender {format_eur(abs(x))}" if x < 0 else "—")
+        modo = st.radio(
+            "Modo de análisis",
+            ["Rebalanceo sobre cartera actual", "Plan de aportaciones hasta 60% del patrimonio"],
+            horizontal=True,
         )
 
-        display_cols = ["Fondo_corto", "Tipo", "Peso actual %", "Peso objetivo %", "Desviación pp", "Importe actual €", "Acción"]
-        display_df = tabla[display_cols].rename(columns={"Fondo_corto": "Fondo"})
+        if modo == "Rebalanceo sobre cartera actual":
+            rebalanceo_df = calc_rebalanceo_actual_vs_objetivo(cartera_actual_df, cartera_objetivo_df)
 
-        st.subheader("Comparativa de pesos")
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            column_config={
-                "Desviación pp": st.column_config.NumberColumn(
-                    "Desviación pp",
-                    format="%.2f",
-                    help="> +2pp: sobreponderar | < -2pp: infraponderar",
+            total_actual = rebalanceo_df["importe_actual"].sum()
+            fondos_sobre = int((rebalanceo_df["estado"] == "Sobreponderado").sum())
+            fondos_infra = int((rebalanceo_df["estado"] == "Infraponderado").sum())
+            rotacion_total = abs(
+                rebalanceo_df.loc[rebalanceo_df["accion_rebalanceo"] < 0, "accion_rebalanceo"]
+            ).sum()
+
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total cartera actual", format_eur(total_actual))
+            col2.metric("Fondos sobreponderados", fondos_sobre)
+            col3.metric("Fondos infraponderados", fondos_infra)
+            col4.metric(
+                "Rotación necesaria total (€)",
+                format_eur(rotacion_total),
+                help="Importe total que habría que reducir en fondos sobreponderados para rebalancear la cartera manteniendo su tamaño actual.",
+            )
+
+            tabla = rebalanceo_df.copy()
+            tabla["Peso actual %"] = tabla["peso_actual"] * 100
+            tabla["Peso objetivo %"] = tabla["peso_objetivo"] * 100
+            tabla["Gap pp"] = tabla["gap_pp"]
+            tabla["Importe actual €"] = tabla["importe_actual"]
+            tabla["Importe objetivo €"] = tabla["importe_objetivo_rebalanceo"]
+            tabla["Acción rebalanceo"] = tabla.apply(
+                lambda r: "Mantener"
+                if abs(r["gap_pp"]) < 1.0
+                else (
+                    f"Aumentar {format_eur(abs(r['accion_rebalanceo']))}"
+                    if r["accion_rebalanceo"] > 0
+                    else f"Reducir {format_eur(abs(r['accion_rebalanceo']))}"
                 ),
-            },
-            hide_index=True,
-        )
-
-        n_sobre = int((comp["desviacion"] > 0.02).sum())
-        n_infra = int((comp["desviacion"] < -0.02).sum())
-        total_comprar = comp.loc[comp["accion_eur"] > 0, "accion_eur"].sum()
-        total_vender = comp.loc[comp["accion_eur"] < 0, "accion_eur"].abs().sum()
-        st.info(
-            f"📊 **Resumen de rebalanceo:** {n_sobre} fondos sobreponderados · "
-            f"{n_infra} infraponderados  \n"
-            f"💰 Necesitas aportar **{format_eur(total_comprar)}** y "
-            f"rotar **{format_eur(total_vender)}** para llegar al objetivo"
-        )
-
-        # Gráfico barras agrupadas
-        st.subheader("Peso actual vs objetivo por fondo")
-        fondos_cortos = tabla["Fondo_corto"].tolist()
-        fig_comp = go.Figure()
-        fig_comp.add_trace(
-            go.Bar(
-                name="Peso actual",
-                x=fondos_cortos,
-                y=(tabla["peso_actual"] * 100).tolist(),
-                marker_color="#1f77b4",
+                axis=1,
             )
-        )
-        fig_comp.add_trace(
-            go.Bar(
-                name="Peso objetivo",
-                x=fondos_cortos,
-                y=(tabla["peso_objetivo"] * 100).tolist(),
-                marker_color="#ff7f0e",
+            tabla["Fondo"] = tabla["Fondo"].astype(str)
+            tabla = tabla[
+                [
+                    "Fondo", "Tipo", "Importe actual €", "Peso actual %", "Peso objetivo %",
+                    "Gap pp", "estado", "Importe objetivo €", "Acción rebalanceo"
+                ]
+            ].rename(columns={"estado": "Estado"})
+
+            st.subheader("Tabla principal de rebalanceo")
+            st.dataframe(
+                tabla,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Importe actual €": st.column_config.NumberColumn(format="%.2f"),
+                    "Peso actual %": st.column_config.NumberColumn(format="%.2f"),
+                    "Peso objetivo %": st.column_config.NumberColumn(format="%.2f"),
+                    "Gap pp": st.column_config.NumberColumn(format="%+.2f"),
+                    "Importe objetivo €": st.column_config.NumberColumn(format="%.2f"),
+                },
             )
-        )
-        fig_comp.update_layout(
-            barmode="group",
-            xaxis_title="Fondo",
-            yaxis_title="Peso (%)",
-            xaxis_tickangle=-45,
-            margin=dict(t=30, b=120, l=40, r=40),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        )
-        st.plotly_chart(fig_comp, use_container_width=True)
 
-        st.subheader("Simulador: ¿cuánto necesitas para llegar al objetivo?")
-        st.caption(
-            "Los pesos objetivo vienen del Excel. El importe objetivo por defecto "
-            "es el 60% de tu patrimonio total. Mueve el slider para simular otros escenarios."
-        )
+            st.subheader("Gap por fondo (pp)")
+            gaps = rebalanceo_df.sort_values("gap_pp", ascending=False).copy()
+            fig_gaps = go.Figure(
+                go.Bar(
+                    x=gaps["gap_pp"],
+                    y=gaps["Fondo"],
+                    orientation="h",
+                    marker_color=["#d62728" if v > 0 else "#2ca02c" for v in gaps["gap_pp"]],
+                    text=[f"{v:+.2f} pp" for v in gaps["gap_pp"]],
+                    textposition="outside",
+                )
+            )
+            fig_gaps.update_layout(
+                xaxis_title="Gap (pp)",
+                yaxis_title="Fondo",
+                margin=dict(t=30, b=30, l=30, r=30),
+                yaxis=dict(autorange="reversed"),
+            )
+            st.plotly_chart(fig_gaps, use_container_width=True)
 
-        cartera_objetivo_eur = patrimonio_total * 0.60
+            st.subheader("Comparativa agregada por categoría")
+            agregado = rebalanceo_df.groupby("Tipo agrupado", as_index=False).agg(
+                importe_actual=("importe_actual", "sum"),
+                peso_objetivo=("peso_objetivo", "sum"),
+            )
+            agregado["peso_actual"] = agregado["importe_actual"] / total_actual if total_actual > 0 else 0.0
+            agregado["peso_actual_pct"] = agregado["peso_actual"] * 100
+            agregado["peso_objetivo_pct"] = agregado["peso_objetivo"] * 100
+            orden = ["Liquidez / Monetario", "Renta Fija", "Mixto", "Renta Variable", "Otros"]
+            agregado["orden"] = agregado["Tipo agrupado"].apply(lambda x: orden.index(x) if x in orden else 99)
+            agregado = agregado.sort_values("orden")
 
-        patrimonio_slider = st.slider(
-            "Cartera objetivo total (€)",
-            min_value=int(round(cartera_actual_df["Importe actual"].sum() / 500) * 500),
-            max_value=50000,
-            step=500,
-            value=int(round(cartera_objetivo_eur / 500) * 500),
-            help="Por defecto el 60% de tu patrimonio total. Ajústalo para simular otros escenarios."
-        )
+            fig_agregado = go.Figure()
+            fig_agregado.add_trace(
+                go.Bar(name="Peso actual agregado", x=agregado["Tipo agrupado"], y=agregado["peso_actual_pct"])
+            )
+            fig_agregado.add_trace(
+                go.Bar(name="Peso objetivo agregado", x=agregado["Tipo agrupado"], y=agregado["peso_objetivo_pct"])
+            )
+            fig_agregado.update_layout(
+                barmode="group",
+                xaxis_title="Categoría",
+                yaxis_title="Peso (%)",
+                margin=dict(t=30, b=30, l=30, r=30),
+            )
+            st.plotly_chart(fig_agregado, use_container_width=True)
+        else:
+            plan_df = calc_plan_aportaciones_60(cartera_actual_df, cartera_objetivo_df, patrimonio_total)
+            cartera_objetivo_total = patrimonio_total * 0.60
+            aportacion_total = plan_df.loc[plan_df["aportacion_necesaria"] > 0, "aportacion_necesaria"].sum()
+            fondos_reforzar = int((plan_df["aportacion_necesaria"] > 0).sum())
 
-        sim = comp.copy()
-        sim["importe_objetivo_sim"] = sim["peso_objetivo"] * patrimonio_slider
-        sim["aportacion_necesaria"] = sim["importe_objetivo_sim"] - sim["importe_actual"]
-        sim["Fondo_corto"] = sim["Fondo"].astype(str).str[:35]
+            st.caption(
+                f"Objetivo de cartera invertida = 60% del patrimonio total ({format_eur(cartera_objetivo_total)}), "
+                "coherente con la pestaña 🏦 Patrimonio."
+            )
 
-        sim_display = sim[["Fondo_corto", "Tipo", "importe_actual", "importe_objetivo_sim", "aportacion_necesaria"]].copy()
-        sim_display.columns = ["Fondo", "Tipo", "Importe actual €", "Importe objetivo €", "Necesitas (€)"]
-        sim_display = sim_display.round(2)
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Patrimonio total", format_eur(patrimonio_total))
+            col2.metric("Objetivo invertido (60%)", format_eur(cartera_objetivo_total))
+            col3.metric(
+                "Aportación nueva necesaria total",
+                format_eur(aportacion_total),
+                help="Este modo no representa un rebalanceo puro, sino un plan de asignación del capital adicional necesario para que la cartera invertida alcance el 60% del patrimonio.",
+            )
+            col4.metric("Fondos a reforzar", fondos_reforzar)
 
-        total_necesario = sim["aportacion_necesaria"].clip(lower=0).sum()
-        st.dataframe(sim_display, use_container_width=True, hide_index=True)
-        st.info(
-            f"Para llegar a una cartera de **{format_eur(patrimonio_slider)}** "
-            f"necesitas aportar un total de **{format_eur(total_necesario)}** adicionales."
-        )
+            mostrar_solo_reforzar = st.checkbox(
+                "Mostrar solo fondos con aportación necesaria positiva",
+                value=True
+            )
+
+            tabla_plan = plan_df.copy()
+            tabla_plan["Peso actual %"] = tabla_plan["peso_actual"] * 100
+            tabla_plan["Peso objetivo %"] = tabla_plan["peso_objetivo"] * 100
+            tabla_plan["Importe actual €"] = tabla_plan["importe_actual"]
+            tabla_plan["Importe objetivo €"] = tabla_plan["importe_objetivo_aportacion"]
+            tabla_plan["Aportación necesaria €"] = tabla_plan["aportacion_necesaria"]
+
+            if mostrar_solo_reforzar:
+                tabla_plan = tabla_plan[tabla_plan["Aportación necesaria €"] > 0].copy()
+
+            tabla_plan = tabla_plan[
+                [
+                    "Fondo", "Tipo", "Importe actual €", "Peso actual %",
+                    "Peso objetivo %", "Importe objetivo €", "Aportación necesaria €", "prioridad"
+                ]
+            ].rename(columns={"prioridad": "Prioridad"})
+
+            st.subheader("Tabla principal de aportaciones")
+            st.dataframe(
+                tabla_plan,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Importe actual €": st.column_config.NumberColumn(format="%.2f"),
+                    "Peso actual %": st.column_config.NumberColumn(format="%.2f"),
+                    "Peso objetivo %": st.column_config.NumberColumn(format="%.2f"),
+                    "Importe objetivo €": st.column_config.NumberColumn(format="%.2f"),
+                    "Aportación necesaria €": st.column_config.NumberColumn(format="%.2f"),
+                },
+            )
+
+            st.subheader("Ranking de aportación necesaria")
+            ranking = plan_df.sort_values("aportacion_necesaria", ascending=False).copy()
+            if mostrar_solo_reforzar:
+                ranking = ranking[ranking["aportacion_necesaria"] > 0].copy()
+            fig_rank = go.Figure(
+                go.Bar(
+                    x=ranking["aportacion_necesaria"],
+                    y=ranking["Fondo"],
+                    orientation="h",
+                    marker_color="#1f77b4",
+                    text=[format_eur(v) for v in ranking["aportacion_necesaria"]],
+                    textposition="outside",
+                )
+            )
+            fig_rank.update_layout(
+                xaxis_title="Aportación necesaria (€)",
+                yaxis_title="Fondo",
+                margin=dict(t=30, b=30, l=30, r=30),
+                yaxis=dict(autorange="reversed"),
+            )
+            st.plotly_chart(fig_rank, use_container_width=True)
 
     except Exception as e:
         st.error(f"Error inesperado: {e}")
