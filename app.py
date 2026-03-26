@@ -625,7 +625,7 @@ elif pagina == "📊 Cartera actual vs objetivo":
             tabla = rebalanceo_df.copy()
             tabla["Peso actual %"] = tabla["peso_actual"] * 100
             tabla["Peso objetivo %"] = tabla["peso_objetivo"] * 100
-            tabla["Rentabilidad %"] = tabla["rentabilidad_pct"]
+            tabla["Rentabilidad %"] = tabla["rentabilidad_pct"] * 100
             tabla["Rentabilidad €"] = tabla["rentabilidad_eur"]
             tabla["Gap pp"] = tabla["gap_pp"]
             tabla["Importe actual €"] = tabla["importe_actual"]
@@ -657,7 +657,7 @@ elif pagina == "📊 Cartera actual vs objetivo":
                 column_config={
                     "Importe actual €": st.column_config.NumberColumn(format="%.2f"),
                     "Rentabilidad €": st.column_config.NumberColumn(format="%+.2f"),
-                    "Rentabilidad %": st.column_config.NumberColumn(format="%+.2f"),
+                    "Rentabilidad %": st.column_config.NumberColumn(format="%+.2f%%"),
                     "Peso actual %": st.column_config.NumberColumn(format="%.2f"),
                     "Peso objetivo %": st.column_config.NumberColumn(format="%.2f"),
                     "Gap pp": st.column_config.NumberColumn(format="%+.2f"),
@@ -740,7 +740,7 @@ elif pagina == "📊 Cartera actual vs objetivo":
             tabla_plan = plan_df.copy()
             tabla_plan["Peso actual %"] = tabla_plan["peso_actual"] * 100
             tabla_plan["Peso objetivo %"] = tabla_plan["peso_objetivo"] * 100
-            tabla_plan["Rentabilidad %"] = tabla_plan["rentabilidad_pct"]
+            tabla_plan["Rentabilidad %"] = tabla_plan["rentabilidad_pct"] * 100
             tabla_plan["Rentabilidad €"] = tabla_plan["rentabilidad_eur"]
             tabla_plan["Importe actual €"] = tabla_plan["importe_actual"]
             tabla_plan["Importe objetivo €"] = tabla_plan["importe_objetivo_aportacion"]
@@ -765,7 +765,7 @@ elif pagina == "📊 Cartera actual vs objetivo":
                 column_config={
                     "Importe actual €": st.column_config.NumberColumn(format="%.2f"),
                     "Rentabilidad €": st.column_config.NumberColumn(format="%+.2f"),
-                    "Rentabilidad %": st.column_config.NumberColumn(format="%+.2f"),
+                    "Rentabilidad %": st.column_config.NumberColumn(format="%+.2f%%"),
                     "Peso actual %": st.column_config.NumberColumn(format="%.2f"),
                     "Peso objetivo %": st.column_config.NumberColumn(format="%.2f"),
                     "Importe objetivo €": st.column_config.NumberColumn(format="%.2f"),
