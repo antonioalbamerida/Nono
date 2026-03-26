@@ -792,15 +792,14 @@ elif pagina == "💶 Presupuesto y cash flow":
                 help="Ahorro típico de un mes ordinario sin pagas extra.",
             )
 
-        # BLOQUE 2 — KPI de referencia secundaria (media anual)
-        _, col_media, _ = st.columns(3)
-        with col_media:
-            st.metric(
-                "Ahorro mensual medio anual",
-                format_eur(pres["ahorro_mensual_medio"]),
-                help="Media simple del ahorro anual: ahorro anual / 12. "
-                     "Es una referencia y no representa la disponibilidad real de cada mes.",
-            )
+        # BLOQUE 2 — KPIs de meses con paga extra
+        col_jun, col_dic, col_med = st.columns(3)
+        with col_jun:
+            st.metric("Ahorro en junio", format_eur(pres["ahorro_junio"]))
+        with col_dic:
+            st.metric("Ahorro en diciembre", format_eur(pres["ahorro_diciembre"]))
+        with col_med:
+            st.metric("Ahorro mensual medio anual", format_eur(pres["ahorro_mensual_medio"]))
 
         # BLOQUE 3 — Tasa de ahorro
         tasa = (pres["ahorro_anual"] / pres["ingreso_anual"] * 100) if pres["ingreso_anual"] > 0 else 0.0
@@ -893,7 +892,7 @@ elif pagina == "💶 Presupuesto y cash flow":
         # BLOQUE 8 — Texto de apoyo
         st.caption(
             "El ahorro mensual base refleja un mes ordinario sin pagas extra. "
-            "Junio y diciembre incluyen su paga extra correspondiente (visible en la tabla y gráfico mensual). "
+            "Junio y diciembre incluyen su paga extra correspondiente. "
             "El ahorro mensual medio anual es solo una media y no representa la disponibilidad real de todos los meses."
         )
 
