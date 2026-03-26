@@ -1148,23 +1148,48 @@ elif pagina == "📈 Proyección / escenarios":
                 "Ahorro estimado": [format_eur(a) for a in ahorros_mensuales],
             })
             st.dataframe(df_ahorros, hide_index=True, use_container_width=True)
-            st.caption(f"Ahorro medio mensual: {format_eur(sum(ahorros_mensuales)/12)} · "
-                      f"De ese ahorro, inviertes el {pct_invertido*100:.0f}% "
-                      f"({format_eur(sum(ahorros_mensuales)/12 * pct_invertido)}/mes de media)")
+            ahorro_medio = sum(ahorros_mensuales) / 12
+            if mantener_60pct:
+                st.caption(f"Ahorro medio mensual: {format_eur(ahorro_medio)} · "
+                          f"Modo: el ahorro se distribuye cada mes para mantener el 60% del patrimonio invertido.")
+            else:
+                st.caption(f"Ahorro medio mensual: {format_eur(ahorro_medio)} · "
+                          f"De ese ahorro, inviertes el {pct_invertido*100:.0f}% "
+                          f"({format_eur(ahorro_medio * pct_invertido)}/mes de media)")
 
         rent_opt = rent_base + 2.0
         rent_pes = max(rent_base - 2.0, 0.0)
 
-        df_base = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_base, horizonte, ingresos_mensuales, INCREMENTO_NOMINA)
-        df_opt  = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_opt,  horizonte, ingresos_mensuales, INCREMENTO_NOMINA)
-        df_pes  = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_pes,  horizonte, ingresos_mensuales, INCREMENTO_NOMINA)
+        kwargs_proy = dict(
+            patrimonio_inicial=patrimonio_total,
+            cartera_inicial=cartera_inicial,
+            ahorros_mensuales=ahorros_mensuales,
+            pct_ahorro_invertido=pct_invertido if not mantener_60pct else 0.0,
+            rentabilidad_anual_pct=rent_base,
+            ingresos_mensuales=ingresos_mensuales,
+            incremento_nomina_anual=INCREMENTO_NOMINA,
+            incremento_gastos_anual=incremento_gastos / 100,
+            mantener_60pct=mantener_60pct,
+        )
+        df_base = calc_proyeccion_patrimonio(**{**kwargs_proy, "rentabilidad_anual_pct": rent_base, "años": horizonte})
+        df_opt  = calc_proyeccion_patrimonio(**{**kwargs_proy, "rentabilidad_anual_pct": rent_opt,  "años": horizonte})
+        df_pes  = calc_proyeccion_patrimonio(**{**kwargs_proy, "rentabilidad_anual_pct": rent_pes,  "años": horizonte})
 
         # Gráfico escenarios
         st.subheader("Evolución del patrimonio total")
+        modo_inversion_txt = (
+            "El ahorro mensual se distribuye automáticamente para mantener el 60% del patrimonio invertido."
+            if mantener_60pct
+            else f"El {pct_invertido*100:.0f}% del ahorro mensual va a cartera, el resto a liquidez."
+        )
+        gastos_txt = (
+            f"Los gastos crecen un {incremento_gastos:.1f}%/año."
+            if incremento_gastos > 0
+            else "Los gastos se mantienen fijos."
+        )
         st.caption(
-            "La rentabilidad se aplica únicamente al patrimonio invertido (cartera). "
-            "La parte no invertida (liquidez) no genera rentabilidad en esta simulación. "
-            f"Se aplica una subida de nómina del {INCREMENTO_NOMINA*100:.0f}% anual con gastos fijos."
+            f"Rentabilidad aplicada solo al patrimonio invertido (cartera). "
+            f"Nómina: +{INCREMENTO_NOMINA*100:.0f}%/año. {gastos_txt} {modo_inversion_txt}"
         )
         fig_proy = go.Figure()
 
@@ -1204,9 +1229,9 @@ elif pagina == "📈 Proyección / escenarios":
         st.subheader("Patrimonio final por escenario")
         resumen_rows = []
         for h in [5, 10, 20]:
-            d_b = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_base, h, ingresos_mensuales, INCREMENTO_NOMINA)
-            d_o = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_opt,  h, ingresos_mensuales, INCREMENTO_NOMINA)
-            d_p = calc_proyeccion_patrimonio(patrimonio_total, cartera_inicial, ahorros_mensuales, pct_invertido, rent_pes,  h, ingresos_mensuales, INCREMENTO_NOMINA)
+            d_b = calc_proyeccion_patrimonio(**{**kwargs_proy, "rentabilidad_anual_pct": rent_base, "años": h})
+            d_o = calc_proyeccion_patrimonio(**{**kwargs_proy, "rentabilidad_anual_pct": rent_opt,  "años": h})
+            d_p = calc_proyeccion_patrimonio(**{**kwargs_proy, "rentabilidad_anual_pct": rent_pes,  "años": h})
             resumen_rows.append({
                 "Horizonte": f"{h} años",
                 f"Pesimista ({rent_pes:.1f}%)": format_eur(d_p.iloc[-1]["patrimonio"]),
