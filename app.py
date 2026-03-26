@@ -792,8 +792,8 @@ elif pagina == "💶 Presupuesto y cash flow":
                 help="Ahorro típico de un mes ordinario sin pagas extra.",
             )
 
-        # BLOQUE 2 — KPI promedio mensual anual y tasa
-        col_med, col_tasa = st.columns(2)
+        # BLOQUE 2 — KPI promedio mensual anual
+        _, col_med, _ = st.columns(3)
         with col_med:
             st.metric(
                 "Ahorro mensual medio anual",
@@ -803,6 +803,8 @@ elif pagina == "💶 Presupuesto y cash flow":
                     "(incluye el efecto de las pagas extra repartido en todo el año)."
                 ),
             )
+
+        # BLOQUE 3 — Tasa de ahorro
         tasa = (pres["ahorro_anual"] / pres["ingreso_anual"] * 100) if pres["ingreso_anual"] > 0 else 0.0
         with col_tasa:
             st.metric(
