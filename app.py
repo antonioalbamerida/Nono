@@ -792,21 +792,21 @@ elif pagina == "💶 Presupuesto y cash flow":
                 help="Ahorro típico de un mes ordinario sin pagas extra.",
             )
 
-        # BLOQUE 2 — KPI promedio mensual anual
-        _, col_med, _ = st.columns(3)
-        with col_med:
+        # BLOQUE 2 — KPIs complementarios (alineados con la rejilla de 4 columnas)
+        col5, col6, _, _ = st.columns(4)
+        with col5:
             st.metric(
                 "Ahorro mensual medio anual",
                 format_eur(pres["ahorro_mensual_medio"]),
                 help=(
-                    "Se calcula como: ahorro anual ÷ 12 "
-                    "(incluye el efecto de las pagas extra repartido en todo el año)."
+                    "Ahorro anual ÷ 12, incluyendo el efecto "
+                    "de las pagas extra repartido en todo el año."
                 ),
             )
 
         # BLOQUE 3 — Tasa de ahorro
         tasa = (pres["ahorro_anual"] / pres["ingreso_anual"] * 100) if pres["ingreso_anual"] > 0 else 0.0
-        with col_tasa:
+        with col6:
             st.metric(
                 "Tasa de ahorro",
                 f"{tasa:.1f}%",
@@ -877,17 +877,24 @@ elif pagina == "💶 Presupuesto y cash flow":
 
         # BLOQUE 7 — Gráfico mensual de ahorro real
         st.subheader("Gráfico mensual de ahorro real")
+        meses_orden = [
+            "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+            "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+        ]
+        detalle_mensual_plot = pres["detalle_mensual_df"].copy()
+        detalle_mensual_plot["Mes"] = pd.Categorical(
+            detalle_mensual_plot["Mes"],
+            categories=meses_orden,
+            ordered=True,
+        )
+        detalle_mensual_plot = detalle_mensual_plot.sort_values("Mes")
+
         fig_ahorro_mes = px.bar(
-            pres["detalle_mensual_df"],
+            detalle_mensual_plot,
             x="Mes",
             y="Ahorro del mes",
             color="Tipo de mes",
-            category_orders={
-                "Mes": [
-                    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-                    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-                ]
-            },
+            category_orders={"Mes": meses_orden},
             color_discrete_map={
                 "Mes normal": "#1f77b4",
                 "Mes con paga extra": "#2ca02c",
@@ -899,10 +906,7 @@ elif pagina == "💶 Presupuesto y cash flow":
             legend_title_text="",
             xaxis={
                 "categoryorder": "array",
-                "categoryarray": [
-                    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
-                    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
-                ],
+                "categoryarray": meses_orden,
             },
         )
         st.plotly_chart(fig_ahorro_mes, use_container_width=True)
