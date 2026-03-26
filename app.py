@@ -806,7 +806,6 @@ elif pagina == "💶 Presupuesto y cash flow":
 
         # BLOQUE 3 — Tasa de ahorro
         tasa = (pres["ahorro_anual"] / pres["ingreso_anual"] * 100) if pres["ingreso_anual"] > 0 else 0.0
-        _, col_tasa, _ = st.columns(3)
         with col_tasa:
             st.metric(
                 "Tasa de ahorro",
@@ -883,13 +882,29 @@ elif pagina == "💶 Presupuesto y cash flow":
             x="Mes",
             y="Ahorro del mes",
             color="Tipo de mes",
+            category_orders={
+                "Mes": [
+                    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+                ]
+            },
             color_discrete_map={
                 "Mes normal": "#1f77b4",
                 "Mes con paga extra": "#2ca02c",
             },
             labels={"Ahorro del mes": "Ahorro del mes (€)"},
         )
-        fig_ahorro_mes.update_layout(margin=dict(t=30, b=30, l=30, r=30), legend_title_text="")
+        fig_ahorro_mes.update_layout(
+            margin=dict(t=30, b=30, l=30, r=30),
+            legend_title_text="",
+            xaxis={
+                "categoryorder": "array",
+                "categoryarray": [
+                    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+                    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+                ],
+            },
+        )
         st.plotly_chart(fig_ahorro_mes, use_container_width=True)
 
         # BLOQUE 8 — Texto de apoyo
