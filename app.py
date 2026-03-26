@@ -441,6 +441,18 @@ def calc_proyeccion_patrimonio(
     liquidez = patrimonio_inicial - cartera_inicial
     aportaciones_acum = 0.0
 
+    # Punto inicial (mes 0) para que la proyección arranque exactamente
+    # en el mismo patrimonio total mostrado en la pestaña de Patrimonio.
+    registros.append({
+        "mes": 0,
+        "año": 0.0,
+        "patrimonio": patrimonio_inicial,
+        "cartera": cartera,
+        "liquidez": liquidez,
+        "capital_propio": patrimonio_inicial,
+        "rentabilidad_generada": 0.0,
+    })
+
     for m in range(1, años * 12 + 1):
         mes_del_año = ((m - 1) % 12)  # 0=enero, 5=junio, 11=diciembre
         ahorro_mes = ahorros_mensuales[mes_del_año]
@@ -1017,6 +1029,10 @@ elif pagina == "📈 Proyección / escenarios":
 
         # Gráfico escenarios
         st.subheader("Evolución del patrimonio total")
+        st.caption(
+            "La rentabilidad se aplica únicamente al patrimonio invertido (cartera). "
+            "La parte no invertida (liquidez) no genera rentabilidad en esta simulación."
+        )
         fig_proy = go.Figure()
 
         fig_proy.add_trace(go.Scatter(
