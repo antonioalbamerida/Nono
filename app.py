@@ -632,9 +632,7 @@ elif pagina == "📊 Cartera actual vs objetivo":
             tabla["Peso objetivo %"] = tabla["peso_objetivo"] * 100
             tabla["Rentabilidad %"] = tabla["rentabilidad_pct"] * 100
             tabla["Rentabilidad €"] = tabla["rentabilidad_eur"]
-            tabla["Gap pp"] = tabla["gap_pp"]
             tabla["Importe actual €"] = tabla["importe_actual"]
-            tabla["Importe objetivo €"] = tabla["importe_objetivo_rebalanceo"]
             tabla["Acción rebalanceo"] = tabla.apply(
                 lambda r: "Mantener"
                 if abs(r["gap_pp"]) < 1.0
@@ -649,10 +647,9 @@ elif pagina == "📊 Cartera actual vs objetivo":
             tabla = tabla[
                 [
                     "Fondo", "Tipo", "Importe actual €", "Rentabilidad €", "Rentabilidad %",
-                    "Peso actual %", "Peso objetivo %", "Gap pp", "estado",
-                    "Importe objetivo €", "Acción rebalanceo"
+                    "Peso actual %", "Peso objetivo %", "Acción rebalanceo"
                 ]
-            ].rename(columns={"estado": "Estado"})
+            ]
 
             st.subheader("Tabla principal de rebalanceo")
             st.dataframe(
@@ -665,8 +662,6 @@ elif pagina == "📊 Cartera actual vs objetivo":
                     "Rentabilidad %": st.column_config.NumberColumn(format="%+.2f%%"),
                     "Peso actual %": st.column_config.NumberColumn(format="%.2f"),
                     "Peso objetivo %": st.column_config.NumberColumn(format="%.2f"),
-                    "Gap pp": st.column_config.NumberColumn(format="%+.2f"),
-                    "Importe objetivo €": st.column_config.NumberColumn(format="%.2f"),
                 },
             )
 
