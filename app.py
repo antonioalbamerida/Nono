@@ -747,6 +747,13 @@ if pagina == "🏦 Patrimonio":
             fig_donut.update_layout(showlegend=True, margin=dict(t=30, b=30, l=30, r=30))
             st.plotly_chart(fig_donut, use_container_width=True)
 
+            otros_unmapped = cartera_actual_df[
+                cartera_actual_df["Tipo de activo"].apply(normalize_tipo_activo) == "Otros"
+            ][["Fondo", "Tipo de activo", "Importe actual"]].copy()
+            if not otros_unmapped.empty:
+                with st.expander("⚠️ Activos clasificados como 'Otros' (tipo no reconocido)"):
+                    st.dataframe(otros_unmapped, use_container_width=True, hide_index=True)
+
         with col_barras:
             st.subheader("Saldo por cuenta bancaria")
             fig_bar = go.Figure(
@@ -898,6 +905,13 @@ elif pagina == "📊 Cartera actual vs objetivo":
                 margin=dict(t=30, b=30, l=30, r=30),
             )
             st.plotly_chart(fig_agregado, use_container_width=True)
+
+            otros_unmapped_reb = cartera_actual_df[
+                cartera_actual_df["Tipo de activo"].apply(normalize_tipo_activo) == "Otros"
+            ][["Fondo", "Tipo de activo", "Importe actual"]].copy()
+            if not otros_unmapped_reb.empty:
+                with st.expander("⚠️ Activos clasificados como 'Otros' (tipo no reconocido)"):
+                    st.dataframe(otros_unmapped_reb, use_container_width=True, hide_index=True)
         else:
             plan_df = calc_plan_aportaciones_60(cartera_actual_df, cartera_objetivo_df, patrimonio_total)
             cartera_objetivo_total = patrimonio_total * 0.60
