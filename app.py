@@ -156,6 +156,16 @@ def _calc_por_tipo_agrupado_flexible(df: pd.DataFrame) -> pd.DataFrame:
         if pd.notna(pct_rv) and pd.notna(pct_rf) and (pct_rv + pct_rf) <= 1.0:
             pct_rv = pct_rv * 100
             pct_rf = pct_rf * 100
+        elif pd.notna(pct_rv) and pd.isna(pct_rf) and pct_rv <= 1.0:
+            pct_rv = pct_rv * 100
+        elif pd.notna(pct_rf) and pd.isna(pct_rv) and pct_rf <= 1.0:
+            pct_rf = pct_rf * 100
+
+        # Si sólo uno de los dos porcentajes está disponible, inferir el otro
+        if pd.notna(pct_rv) and pd.isna(pct_rf):
+            pct_rf = 100.0 - pct_rv
+        elif pd.notna(pct_rf) and pd.isna(pct_rv):
+            pct_rv = 100.0 - pct_rf
 
         if tipo_agrupado == "Mixto" and pd.notna(pct_rv) and pd.notna(pct_rf):
             rows.append({"Tipo agrupado": "Renta Variable", "Importe actual": importe * pct_rv / 100})
@@ -192,14 +202,35 @@ def _expand_rebalanceo_agrupado(df: pd.DataFrame) -> pd.DataFrame:
         if pd.notna(pct_rv) and pd.notna(pct_rf) and (pct_rv + pct_rf) <= 1.0:
             pct_rv = pct_rv * 100
             pct_rf = pct_rf * 100
+        elif pd.notna(pct_rv) and pd.isna(pct_rf) and pct_rv <= 1.0:
+            pct_rv = pct_rv * 100
+        elif pd.notna(pct_rf) and pd.isna(pct_rv) and pct_rf <= 1.0:
+            pct_rf = pct_rf * 100
+
         if pd.notna(pct_rv_obj) and pd.notna(pct_rf_obj) and (pct_rv_obj + pct_rf_obj) <= 1.0:
             pct_rv_obj = pct_rv_obj * 100
             pct_rf_obj = pct_rf_obj * 100
+        elif pd.notna(pct_rv_obj) and pd.isna(pct_rf_obj) and pct_rv_obj <= 1.0:
+            pct_rv_obj = pct_rv_obj * 100
+        elif pd.notna(pct_rf_obj) and pd.isna(pct_rv_obj) and pct_rf_obj <= 1.0:
+            pct_rf_obj = pct_rf_obj * 100
+
+        # Si sólo uno de los dos porcentajes está disponible, inferir el otro
+        if pd.notna(pct_rv) and pd.isna(pct_rf):
+            pct_rf = 100.0 - pct_rv
+        elif pd.notna(pct_rf) and pd.isna(pct_rv):
+            pct_rv = 100.0 - pct_rf
 
         if pd.isna(pct_rv_obj):
             pct_rv_obj = pct_rv
         if pd.isna(pct_rf_obj):
             pct_rf_obj = pct_rf
+
+        # Si sólo uno de los dos porcentajes obj está disponible, inferir el otro
+        if pd.notna(pct_rv_obj) and pd.isna(pct_rf_obj):
+            pct_rf_obj = 100.0 - pct_rv_obj
+        elif pd.notna(pct_rf_obj) and pd.isna(pct_rv_obj):
+            pct_rv_obj = 100.0 - pct_rf_obj
 
         if tipo_ag == "Mixto" and pd.notna(pct_rv) and pd.notna(pct_rf):
             rows.append({
