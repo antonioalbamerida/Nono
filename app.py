@@ -152,6 +152,11 @@ def _calc_por_tipo_agrupado_flexible(df: pd.DataFrame) -> pd.DataFrame:
         pct_rv = pd.to_numeric(row.get("% Renta Variable", None), errors="coerce")
         pct_rf = pd.to_numeric(row.get("% Renta Fija", None), errors="coerce")
 
+        # Excel almacena los porcentajes como decimales (0.5 = 50%); normalizar si es necesario
+        if pd.notna(pct_rv) and pd.notna(pct_rf) and (pct_rv + pct_rf) <= 1.0:
+            pct_rv = pct_rv * 100
+            pct_rf = pct_rf * 100
+
         if tipo_agrupado == "Mixto" and pd.notna(pct_rv) and pd.notna(pct_rf):
             rows.append({"Tipo agrupado": "Renta Variable", "Importe actual": importe * pct_rv / 100})
             rows.append({"Tipo agrupado": "Renta Fija", "Importe actual": importe * pct_rf / 100})
