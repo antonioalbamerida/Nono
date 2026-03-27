@@ -47,6 +47,9 @@ def load_cartera_actual() -> pd.DataFrame:
         )
         for col in ["Importe inicial", "Importe actual", "Rentabilidad %", "Rentabilidad en Euros"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+        for col in ["% Renta Variable", "% Renta Fija"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df[pd.notna(df["ISIN"])].copy()
         return df
     except Exception as e:
@@ -62,6 +65,9 @@ def load_cartera_objetivo() -> pd.DataFrame:
         validate_columns(df, ["Fondo", "ISIN", "Tipo de activo", "Importe", "Peso"], "Cartera objetivo")
         for col in ["Peso", "Importe"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+        for col in ["% Renta Variable", "% Renta Fija"]:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
         df = df[pd.notna(df["ISIN"])].copy()
         return df
     except Exception as e:
@@ -131,6 +137,89 @@ def normalize_tipo_activo(tipo: str) -> str:
     return MAPA_TIPOS.get(tipo_txt, "Otros")
 
 
+def _calc_por_tipo_agrupado_flexible(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Agrupa el importe actual por tipo de activo, descomponiendo los fondos flexibles mixtos
+    según sus columnas '% Renta Variable' y '% Renta Fija' en lugar de clasificarlos como 'Mixto'.
+    """
+    rows = []
+    for _, row in df.iterrows():
+        tipo = str(row.get("Tipo de activo", "")).strip()
+        importe = float(pd.to_numeric(row.get("Importe actual", 0), errors="coerce") or 0)
+        tipo_agrupado = normalize_tipo_activo(tipo)
+
+        pct_rv = pd.to_numeric(row.get("% Renta Variable", None), errors="coerce")
+        pct_rf = pd.to_numeric(row.get("% Renta Fija", None), errors="coerce")
+
+        if tipo_agrupado == "Mixto" and pd.notna(pct_rv) and pd.notna(pct_rf):
+            rows.append({"Tipo agrupado": "Renta Variable", "Importe actual": importe * pct_rv / 100})
+            rows.append({"Tipo agrupado": "Renta Fija", "Importe actual": importe * pct_rf / 100})
+            resto = 100 - pct_rv - pct_rf
+            if abs(resto) > 0.01:
+                rows.append({"Tipo agrupado": "Otros", "Importe actual": importe * resto / 100})
+        else:
+            rows.append({"Tipo agrupado": tipo_agrupado, "Importe actual": importe})
+
+    if not rows:
+        return pd.DataFrame(columns=["Tipo agrupado", "Importe actual"])
+    return pd.DataFrame(rows).groupby("Tipo agrupado")["Importe actual"].sum().reset_index()
+
+
+def _expand_rebalanceo_agrupado(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Genera el agregado por categoría para la comparativa actual vs objetivo,
+    descomponiendo los fondos flexibles mixtos según '% Renta Variable' / '% Renta Fija'
+    tanto en el importe actual como en el peso objetivo.
+    """
+    rows = []
+    for _, row in df.iterrows():
+        tipo_ag = row["Tipo agrupado"]
+        importe = float(row.get("importe_actual", 0) or 0)
+        peso_obj = float(row.get("peso_objetivo", 0) or 0)
+
+        pct_rv = pd.to_numeric(row.get("% Renta Variable", None), errors="coerce")
+        pct_rf = pd.to_numeric(row.get("% Renta Fija", None), errors="coerce")
+        pct_rv_obj = pd.to_numeric(row.get("% Renta Variable obj", None), errors="coerce")
+        pct_rf_obj = pd.to_numeric(row.get("% Renta Fija obj", None), errors="coerce")
+
+        if pd.isna(pct_rv_obj):
+            pct_rv_obj = pct_rv
+        if pd.isna(pct_rf_obj):
+            pct_rf_obj = pct_rf
+
+        if tipo_ag == "Mixto" and pd.notna(pct_rv) and pd.notna(pct_rf):
+            rows.append({
+                "Tipo agrupado": "Renta Variable",
+                "importe_actual": importe * pct_rv / 100,
+                "peso_objetivo": peso_obj * pct_rv_obj / 100 if pd.notna(pct_rv_obj) else 0,
+            })
+            rows.append({
+                "Tipo agrupado": "Renta Fija",
+                "importe_actual": importe * pct_rf / 100,
+                "peso_objetivo": peso_obj * pct_rf_obj / 100 if pd.notna(pct_rf_obj) else 0,
+            })
+            resto = 100 - pct_rv - pct_rf
+            if abs(resto) > 0.01:
+                rows.append({
+                    "Tipo agrupado": "Otros",
+                    "importe_actual": importe * resto / 100,
+                    "peso_objetivo": 0,
+                })
+        else:
+            rows.append({
+                "Tipo agrupado": tipo_ag,
+                "importe_actual": importe,
+                "peso_objetivo": peso_obj,
+            })
+
+    if not rows:
+        return pd.DataFrame(columns=["Tipo agrupado", "importe_actual", "peso_objetivo"])
+    return pd.DataFrame(rows).groupby("Tipo agrupado", as_index=False).agg(
+        importe_actual=("importe_actual", "sum"),
+        peso_objetivo=("peso_objetivo", "sum"),
+    )
+
+
 def calc_resumen_cartera(cartera_df: pd.DataFrame) -> dict:
     """Devuelve dict con: total_inicial, total_actual, rentabilidad_eur, rentabilidad_pct, por_tipo, por_tipo_agrupado"""
     total_inicial = cartera_df["Importe inicial"].sum()
@@ -138,10 +227,7 @@ def calc_resumen_cartera(cartera_df: pd.DataFrame) -> dict:
     rent_eur = cartera_df["Rentabilidad en Euros"].sum()
     rent_pct = (total_actual - total_inicial) / total_inicial if total_inicial > 0 else 0
     por_tipo = cartera_df.groupby("Tipo de activo")["Importe actual"].sum().reset_index()
-    tmp = cartera_df.copy()
-    tmp["tipo_agrupado"] = tmp["Tipo de activo"].map(MAPA_TIPOS).fillna("Otros")
-    por_tipo_agrupado = tmp.groupby("tipo_agrupado")["Importe actual"].sum().reset_index()
-    por_tipo_agrupado.columns = ["Tipo agrupado", "Importe actual"]
+    por_tipo_agrupado = _calc_por_tipo_agrupado_flexible(cartera_df)
     return {
         "total_inicial": total_inicial,
         "total_actual": total_actual,
@@ -198,20 +284,23 @@ def calc_comparacion_cartera(
 
 
 def _merge_actual_objetivo(actual_df: pd.DataFrame, objetivo_df: pd.DataFrame) -> pd.DataFrame:
-    act = actual_df[
-        ["ISIN", "Fondo", "Tipo de activo", "Importe actual", "Rentabilidad %", "Rentabilidad en Euros"]
-    ].copy()
-    act.columns = [
-        "ISIN",
-        "Fondo",
-        "Tipo",
-        "importe_actual",
-        "rentabilidad_pct",
-        "rentabilidad_eur",
-    ]
+    act_base_cols = ["ISIN", "Fondo", "Tipo de activo", "Importe actual", "Rentabilidad %", "Rentabilidad en Euros"]
+    act_pct_cols = [c for c in ["% Renta Variable", "% Renta Fija"] if c in actual_df.columns]
+    act = actual_df[act_base_cols + act_pct_cols].copy()
+    act = act.rename(columns={
+        "Tipo de activo": "Tipo",
+        "Importe actual": "importe_actual",
+        "Rentabilidad %": "rentabilidad_pct",
+        "Rentabilidad en Euros": "rentabilidad_eur",
+    })
 
-    obj = objetivo_df[["ISIN", "Fondo", "Tipo de activo", "Peso"]].copy()
-    obj.columns = ["ISIN", "Fondo_obj", "Tipo_obj", "peso_objetivo"]
+    obj_base_cols = ["ISIN", "Fondo", "Tipo de activo", "Peso"]
+    obj_pct_cols = [c for c in ["% Renta Variable", "% Renta Fija"] if c in objetivo_df.columns]
+    obj = objetivo_df[obj_base_cols + obj_pct_cols].copy()
+    obj_rename = {"Fondo": "Fondo_obj", "Tipo de activo": "Tipo_obj", "Peso": "peso_objetivo"}
+    for c in obj_pct_cols:
+        obj_rename[c] = c + " obj"
+    obj = obj.rename(columns=obj_rename)
 
     merged = act.merge(obj, on="ISIN", how="outer")
     merged["importe_actual"] = pd.to_numeric(merged["importe_actual"], errors="coerce").fillna(0.0)
@@ -221,18 +310,12 @@ def _merge_actual_objetivo(actual_df: pd.DataFrame, objetivo_df: pd.DataFrame) -
     merged["Fondo"] = merged["Fondo"].fillna(merged["Fondo_obj"]).fillna("Sin nombre")
     merged["Tipo"] = merged["Tipo"].fillna(merged["Tipo_obj"]).fillna("Otros")
     merged["Tipo agrupado"] = merged["Tipo"].apply(normalize_tipo_activo)
-    return merged[
-        [
-            "ISIN",
-            "Fondo",
-            "Tipo",
-            "Tipo agrupado",
-            "importe_actual",
-            "peso_objetivo",
-            "rentabilidad_pct",
-            "rentabilidad_eur",
-        ]
-    ].copy()
+
+    result_cols = ["ISIN", "Fondo", "Tipo", "Tipo agrupado", "importe_actual", "peso_objetivo",
+                   "rentabilidad_pct", "rentabilidad_eur"]
+    result_cols += [c for c in act_pct_cols if c in merged.columns]
+    result_cols += [c + " obj" for c in obj_pct_cols if c + " obj" in merged.columns]
+    return merged[result_cols].copy()
 
 
 def calc_rebalanceo_actual_vs_objetivo(actual_df: pd.DataFrame, objetivo_df: pd.DataFrame) -> pd.DataFrame:
@@ -792,10 +875,7 @@ elif pagina == "📊 Cartera actual vs objetivo":
             st.plotly_chart(fig_gaps, use_container_width=True)
 
             st.subheader("Comparativa agregada por categoría")
-            agregado = rebalanceo_df.groupby("Tipo agrupado", as_index=False).agg(
-                importe_actual=("importe_actual", "sum"),
-                peso_objetivo=("peso_objetivo", "sum"),
-            )
+            agregado = _expand_rebalanceo_agrupado(rebalanceo_df)
             agregado["peso_actual"] = agregado["importe_actual"] / total_actual if total_actual > 0 else 0.0
             agregado["peso_actual_pct"] = agregado["peso_actual"] * 100
             agregado["peso_objetivo_pct"] = agregado["peso_objetivo"] * 100
