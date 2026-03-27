@@ -188,6 +188,14 @@ def _expand_rebalanceo_agrupado(df: pd.DataFrame) -> pd.DataFrame:
         pct_rv_obj = pd.to_numeric(row.get("% Renta Variable obj", None), errors="coerce")
         pct_rf_obj = pd.to_numeric(row.get("% Renta Fija obj", None), errors="coerce")
 
+        # Excel almacena los porcentajes con formato % como decimales (0.5 = 50%); normalizar si es necesario
+        if pd.notna(pct_rv) and pd.notna(pct_rf) and (pct_rv + pct_rf) <= 1.0:
+            pct_rv = pct_rv * 100
+            pct_rf = pct_rf * 100
+        if pd.notna(pct_rv_obj) and pd.notna(pct_rf_obj) and (pct_rv_obj + pct_rf_obj) <= 1.0:
+            pct_rv_obj = pct_rv_obj * 100
+            pct_rf_obj = pct_rf_obj * 100
+
         if pd.isna(pct_rv_obj):
             pct_rv_obj = pct_rv
         if pd.isna(pct_rf_obj):
