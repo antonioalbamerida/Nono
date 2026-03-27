@@ -167,7 +167,9 @@ def _calc_por_tipo_agrupado_flexible(df: pd.DataFrame) -> pd.DataFrame:
         elif pd.notna(pct_rf) and pd.isna(pct_rv):
             pct_rv = 100.0 - pct_rf
 
-        if tipo_agrupado == "Mixto" and pd.notna(pct_rv) and pd.notna(pct_rf):
+        if tipo_agrupado == "Mixto":
+            if pd.isna(pct_rv) and pd.isna(pct_rf):
+                pct_rv, pct_rf = 50.0, 50.0
             rows.append({"Tipo agrupado": "Renta Variable", "Importe actual": importe * pct_rv / 100})
             rows.append({"Tipo agrupado": "Renta Fija", "Importe actual": importe * pct_rf / 100})
             resto = 100 - pct_rv - pct_rf
@@ -232,16 +234,26 @@ def _expand_rebalanceo_agrupado(df: pd.DataFrame) -> pd.DataFrame:
         elif pd.notna(pct_rf_obj) and pd.isna(pct_rv_obj):
             pct_rv_obj = 100.0 - pct_rf_obj
 
-        if tipo_ag == "Mixto" and pd.notna(pct_rv) and pd.notna(pct_rf):
+        if tipo_ag == "Mixto":
+            # Use obj percentages as fallback when actual percentages are missing
+            if pd.isna(pct_rv) and pd.notna(pct_rv_obj):
+                pct_rv = pct_rv_obj
+            if pd.isna(pct_rf) and pd.notna(pct_rf_obj):
+                pct_rf = pct_rf_obj
+            # Default to 50/50 if no percentages available at all
+            if pd.isna(pct_rv) and pd.isna(pct_rf):
+                pct_rv, pct_rf = 50.0, 50.0
+            if pd.isna(pct_rv_obj) and pd.isna(pct_rf_obj):
+                pct_rv_obj, pct_rf_obj = pct_rv, pct_rf
             rows.append({
                 "Tipo agrupado": "Renta Variable",
                 "importe_actual": importe * pct_rv / 100,
-                "peso_objetivo": peso_obj * pct_rv_obj / 100 if pd.notna(pct_rv_obj) else 0,
+                "peso_objetivo": peso_obj * pct_rv_obj / 100,
             })
             rows.append({
                 "Tipo agrupado": "Renta Fija",
                 "importe_actual": importe * pct_rf / 100,
-                "peso_objetivo": peso_obj * pct_rf_obj / 100 if pd.notna(pct_rf_obj) else 0,
+                "peso_objetivo": peso_obj * pct_rf_obj / 100,
             })
             resto = 100 - pct_rv - pct_rf
             if abs(resto) > 0.01:
