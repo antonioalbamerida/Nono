@@ -127,6 +127,7 @@ MAPA_TIPOS = {
     "Renta variable small caps": "Renta Variable",
     "Renta variable emergente": "Renta Variable",
     "Renta variable": "Renta Variable",
+    "Crypto": "Crypto",
 }
 
 
@@ -879,7 +880,7 @@ elif pagina == "📊 Cartera actual vs objetivo":
             agregado["peso_actual"] = agregado["importe_actual"] / total_actual if total_actual > 0 else 0.0
             agregado["peso_actual_pct"] = agregado["peso_actual"] * 100
             agregado["peso_objetivo_pct"] = agregado["peso_objetivo"] * 100
-            orden = ["Liquidez / Monetario", "Renta Fija", "Mixto", "Renta Variable", "Otros"]
+            orden = ["Liquidez / Monetario", "Renta Fija", "Mixto", "Renta Variable", "Crypto", "Otros"]
             agregado["orden"] = agregado["Tipo agrupado"].apply(lambda x: orden.index(x) if x in orden else 99)
             agregado = agregado.sort_values("orden")
 
