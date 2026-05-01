@@ -278,13 +278,35 @@ def _expand_rebalanceo_agrupado(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def calc_resumen_cartera(cartera_df: pd.DataFrame) -> dict:
-    """Devuelve dict con: total_inicial, total_actual, rentabilidad_eur, rentabilidad_pct, por_tipo, por_tipo_agrupado"""
+    """Devuelve dict con: total_inicial, total_actual, rentabilidad_eur, rentabilidad_pct, por_tipo, por_tipo_agrupado.
+    Incluye también el desglose con/sin crypto: total_*_crypto, total_*_no_crypto, rentabilidad_*_crypto, rentabilidad_*_no_crypto."""
     total_inicial = cartera_df["Importe inicial"].sum()
     total_actual = cartera_df["Importe actual"].sum()
     rent_eur = cartera_df["Rentabilidad en Euros"].sum()
     rent_pct = (total_actual - total_inicial) / total_inicial if total_inicial > 0 else 0
     por_tipo = cartera_df.groupby("Tipo de activo")["Importe actual"].sum().reset_index()
     por_tipo_agrupado = _calc_por_tipo_agrupado_flexible(cartera_df)
+
+    is_crypto = cartera_df["Tipo de activo"].apply(normalize_tipo_activo) == "Crypto"
+    crypto_df = cartera_df[is_crypto]
+    no_crypto_df = cartera_df[~is_crypto]
+
+    total_inicial_crypto = crypto_df["Importe inicial"].sum()
+    total_actual_crypto = crypto_df["Importe actual"].sum()
+    rent_eur_crypto = crypto_df["Rentabilidad en Euros"].sum()
+    rent_pct_crypto = (
+        (total_actual_crypto - total_inicial_crypto) / total_inicial_crypto
+        if total_inicial_crypto > 0 else 0.0
+    )
+
+    total_inicial_no_crypto = no_crypto_df["Importe inicial"].sum()
+    total_actual_no_crypto = no_crypto_df["Importe actual"].sum()
+    rent_eur_no_crypto = no_crypto_df["Rentabilidad en Euros"].sum()
+    rent_pct_no_crypto = (
+        (total_actual_no_crypto - total_inicial_no_crypto) / total_inicial_no_crypto
+        if total_inicial_no_crypto > 0 else 0.0
+    )
+
     return {
         "total_inicial": total_inicial,
         "total_actual": total_actual,
@@ -292,6 +314,14 @@ def calc_resumen_cartera(cartera_df: pd.DataFrame) -> dict:
         "rentabilidad_pct": rent_pct,
         "por_tipo": por_tipo,
         "por_tipo_agrupado": por_tipo_agrupado,
+        "total_inicial_crypto": total_inicial_crypto,
+        "total_actual_crypto": total_actual_crypto,
+        "rentabilidad_eur_crypto": rent_eur_crypto,
+        "rentabilidad_pct_crypto": rent_pct_crypto,
+        "total_inicial_no_crypto": total_inicial_no_crypto,
+        "total_actual_no_crypto": total_actual_no_crypto,
+        "rentabilidad_eur_no_crypto": rent_eur_no_crypto,
+        "rentabilidad_pct_no_crypto": rent_pct_no_crypto,
     }
 
 
@@ -734,10 +764,13 @@ if pagina == "🏦 Patrimonio":
 
         cartera_val = resumen["total_actual"]
         liquidez = patrimonio_total - cartera_val
-        rent_eur = resumen["rentabilidad_eur"]
-        rent_pct = resumen["rentabilidad_pct"] * 100
+        rent_eur_no_crypto = resumen["rentabilidad_eur_no_crypto"]
+        rent_pct_no_crypto = resumen["rentabilidad_pct_no_crypto"] * 100
+        rent_eur_crypto = resumen["rentabilidad_eur_crypto"]
+        rent_pct_crypto = resumen["rentabilidad_pct_crypto"] * 100
+        hay_crypto = resumen["total_inicial_crypto"] > 0
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         with col1:
             st.metric(
                 "Total patrimonio",
@@ -757,13 +790,20 @@ if pagina == "🏦 Patrimonio":
                 help="Efectivo en cuentas bancarias no invertido",
             )
         with col4:
-            delta_label = f"{rent_pct:+.2f}%"
             st.metric(
-                "Rentabilidad cartera",
-                format_eur(rent_eur),
-                delta=delta_label,
+                "Rentabilidad sin crypto",
+                format_eur(rent_eur_no_crypto),
+                delta=f"{rent_pct_no_crypto:+.2f}%",
                 delta_color="normal",
-                help="Ganancia/pérdida total desde el importe inicial invertido",
+                help="Ganancia/pérdida total de la cartera tradicional (excluye fondos de tipo Crypto).",
+            )
+        with col5:
+            st.metric(
+                "Rentabilidad crypto",
+                format_eur(rent_eur_crypto),
+                delta=f"{rent_pct_crypto:+.2f}%" if hay_crypto else None,
+                delta_color="normal",
+                help="Ganancia/pérdida total de los fondos de tipo Crypto.",
             )
 
         objetivo_inversion = patrimonio_total * 0.60
@@ -847,6 +887,11 @@ elif pagina == "📊 Cartera actual vs objetivo":
         resumen_cartera = calc_resumen_cartera(cartera_actual_df)
         rentabilidad_total_eur = resumen_cartera["rentabilidad_eur"]
         rentabilidad_total_pct = resumen_cartera["rentabilidad_pct"] * 100
+        rent_eur_no_crypto = resumen_cartera["rentabilidad_eur_no_crypto"]
+        rent_pct_no_crypto = resumen_cartera["rentabilidad_pct_no_crypto"] * 100
+        rent_eur_crypto = resumen_cartera["rentabilidad_eur_crypto"]
+        rent_pct_crypto = resumen_cartera["rentabilidad_pct_crypto"] * 100
+        hay_crypto = resumen_cartera["total_inicial_crypto"] > 0
         modo = st.radio(
             "Modo de análisis",
             ["Rebalanceo sobre cartera actual", "Plan de aportaciones hasta 60% del patrimonio"],
@@ -863,7 +908,7 @@ elif pagina == "📊 Cartera actual vs objetivo":
                 rebalanceo_df.loc[rebalanceo_df["accion_rebalanceo"] < 0, "accion_rebalanceo"]
             ).sum()
 
-            col1, col2, col3, col4, col5 = st.columns(5)
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
             col1.metric("Total cartera actual", format_eur(total_actual))
             col2.metric("Fondos sobreponderados", fondos_sobre)
             col3.metric("Fondos infraponderados", fondos_infra)
@@ -873,11 +918,18 @@ elif pagina == "📊 Cartera actual vs objetivo":
                 help="Importe total que habría que reducir en fondos sobreponderados para rebalancear la cartera manteniendo su tamaño actual.",
             )
             col5.metric(
-                "Rentabilidad cartera",
-                format_eur(rentabilidad_total_eur),
-                delta=f"{rentabilidad_total_pct:+.2f}%",
+                "Rentabilidad sin crypto",
+                format_eur(rent_eur_no_crypto),
+                delta=f"{rent_pct_no_crypto:+.2f}%",
                 delta_color="normal",
-                help="Ganancia/pérdida total desde el importe inicial invertido.",
+                help="Ganancia/pérdida total de la cartera tradicional (excluye fondos de tipo Crypto).",
+            )
+            col6.metric(
+                "Rentabilidad crypto",
+                format_eur(rent_eur_crypto),
+                delta=f"{rent_pct_crypto:+.2f}%" if hay_crypto else None,
+                delta_color="normal",
+                help="Ganancia/pérdida total de los fondos de tipo Crypto.",
             )
 
             tabla = rebalanceo_df.copy()
@@ -979,7 +1031,7 @@ elif pagina == "📊 Cartera actual vs objetivo":
                 "coherente con la pestaña 🏦 Patrimonio."
             )
 
-            col1, col2, col3, col4, col5 = st.columns(5)
+            col1, col2, col3, col4, col5, col6 = st.columns(6)
             col1.metric("Patrimonio total", format_eur(patrimonio_total))
             col2.metric("Objetivo invertido (60%)", format_eur(cartera_objetivo_total))
             col3.metric(
@@ -989,11 +1041,18 @@ elif pagina == "📊 Cartera actual vs objetivo":
             )
             col4.metric("Fondos a reforzar", fondos_reforzar)
             col5.metric(
-                "Rentabilidad cartera",
-                format_eur(rentabilidad_total_eur),
-                delta=f"{rentabilidad_total_pct:+.2f}%",
+                "Rentabilidad sin crypto",
+                format_eur(rent_eur_no_crypto),
+                delta=f"{rent_pct_no_crypto:+.2f}%",
                 delta_color="normal",
-                help="Ganancia/pérdida total desde el importe inicial invertido.",
+                help="Ganancia/pérdida total de la cartera tradicional (excluye fondos de tipo Crypto).",
+            )
+            col6.metric(
+                "Rentabilidad crypto",
+                format_eur(rent_eur_crypto),
+                delta=f"{rent_pct_crypto:+.2f}%" if hay_crypto else None,
+                delta_color="normal",
+                help="Ganancia/pérdida total de los fondos de tipo Crypto.",
             )
 
             mostrar_solo_reforzar = st.checkbox(
